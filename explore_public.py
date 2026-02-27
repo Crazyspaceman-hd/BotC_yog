@@ -73,6 +73,24 @@ def _team(role: str) -> str:
     return "Evil" if str(role).strip().lower() in _EVIL_ROLES else "Good"
 
 
+# ── table style helpers (no matplotlib needed) ───────────────────────────────
+_REDS_HIGH  = (220,  38,  38)   # red-600
+_BLUES_HIGH = ( 37,  99, 235)   # blue-600
+_CELL_TXT   = "color: white; text-shadow: 0 0 2px #000, 0 0 2px #000"
+
+
+def _color_scale(s, high=_REDS_HIGH):
+    """Gradient from white → high colour; no matplotlib required."""
+    mn, mx = s.min(), s.max()
+    def _cell(v):
+        t = (v - mn) / (mx - mn) if mx > mn else 0.0
+        r = int(255 + t * (high[0] - 255))
+        g = int(255 + t * (high[1] - 255))
+        b = int(255 + t * (high[2] - 255))
+        return f"background-color: rgb({r},{g},{b}); {_CELL_TXT}"
+    return s.apply(_cell)
+
+
 # ── playlist helpers ──────────────────────────────────────────────────────────
 
 def load_playlist() -> list[dict]:
@@ -543,9 +561,9 @@ with tab_home:
 
         def _style_app(row):
             if row["As Evil"] > row["As Good"]:
-                return ["background-color:#ffe4e6; color:#111"] * len(row)
+                return [f"background-color:#ffe4e6; {_CELL_TXT}"] * len(row)
             elif row["As Good"] > row["As Evil"]:
-                return ["background-color:#dcfce7; color:#111"] * len(row)
+                return [f"background-color:#dcfce7; {_CELL_TXT}"] * len(row)
             return [""] * len(row)
 
         st.dataframe(
@@ -646,7 +664,7 @@ with tab_roster:
             bg = "#fef9c3"
         else:
             bg = "#ffe4e6"
-        return [f"background-color: {bg}; color: #111"] * len(row)
+        return [f"background-color: {bg}; {_CELL_TXT}"] * len(row)
 
     # Source legend
     st.markdown(
@@ -809,7 +827,7 @@ with tab_lies_tab:
     ]
 
     def _color_verdict(val: str) -> str:
-        return f"background-color: {VERDICT_BG.get(str(val), '#fff')}; color: #111"
+        return f"background-color: {VERDICT_BG.get(str(val), '#fff')}; {_CELL_TXT}"
 
     st.dataframe(
         view[display_cols].style.map(_color_verdict, subset=["verdict"]),
@@ -918,7 +936,7 @@ with tab_stats:
             "segments":     "Segments",
             "minutes":      "Speaking time (min)",
             "words_per_min": "Words / min",
-        }).style.background_gradient(subset=["Total words"], cmap="Blues"),
+        }).style.apply(_color_scale, subset=["Total words"], high=_BLUES_HIGH),
         use_container_width=True,
         hide_index=True,
     )
@@ -986,7 +1004,7 @@ with tab_stats:
         conv_df = pd.DataFrame(conv_rows)
 
         def _color_type(val: str) -> str:
-            return f"background-color: {TYPE_COLORS.get(val, '#fff')}; color: #111"
+            return f"background-color: {TYPE_COLORS.get(val, '#fff')}; {_CELL_TXT}"
 
         st.dataframe(
             conv_df.style.map(_color_type, subset=["Type"]),
@@ -1079,14 +1097,14 @@ with tab_aggregate:
         def _style_winner(row):
             w = row.get("Winner", "")
             if w == "Evil":
-                return ["background-color:#ffe4e6; color:#111"] * len(row)
+                return [f"background-color:#ffe4e6; {_CELL_TXT}"] * len(row)
             if w == "Good":
-                return ["background-color:#dcfce7; color:#111"] * len(row)
+                return [f"background-color:#dcfce7; {_CELL_TXT}"] * len(row)
             return [""] * len(row)
 
         st.dataframe(
             game_agg.style
-                .background_gradient(subset=["Lies"], cmap="Reds")
+                .apply(_color_scale, subset=["Lies"])
                 .apply(_style_winner, axis=1),
             use_container_width=True,
             hide_index=True,
@@ -1121,7 +1139,7 @@ with tab_aggregate:
 
         st.bar_chart(player_agg.set_index("Player")["Lies"])
         st.dataframe(
-            player_agg.style.background_gradient(subset=["Lies"], cmap="Reds"),
+            player_agg.style.apply(_color_scale, subset=["Lies"]),
             use_container_width=True,
             hide_index=True,
         )
@@ -1235,9 +1253,7 @@ with tab_aggregate:
                         / roles_played["Claims"].replace(0, float("nan"))
                     ).map(lambda v: f"{v:.0%}" if pd.notna(v) else "—")
                     col.dataframe(
-                        roles_played.style.background_gradient(
-                            subset=["Lies"], cmap="Reds"
-                        ),
+                        roles_played.style.apply(_color_scale, subset=["Lies"]),
                         use_container_width=True,
                         hide_index=True,
                     )
@@ -1270,7 +1286,7 @@ with tab_aggregate:
 
             def _style_team(row):
                 bg = "#ffe4e6" if row["Team"] == "Evil" else "#dcfce7"
-                return [f"background-color: {bg}; color: #111"] * len(row)
+                return [f"background-color: {bg}; {_CELL_TXT}"] * len(row)
 
             st.dataframe(
                 game_hist.style.apply(_style_team, axis=1),
