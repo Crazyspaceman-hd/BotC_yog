@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS videos (
     title        TEXT,
     duration     INTEGER,
     url          TEXT,
-    winner       TEXT            -- 'Good', 'Evil', or NULL
+    winner       TEXT,           -- 'Good', 'Evil', or NULL
+    members      INTEGER DEFAULT 0  -- 1 = members/bonus game
 );
 
 CREATE TABLE IF NOT EXISTS lies (
@@ -115,8 +116,8 @@ def build(db_path: Path) -> None:
     # ── videos ────────────────────────────────────────────────────────────────
     print(f"Loading {len(entries)} videos …")
     con.executemany(
-        "INSERT OR REPLACE INTO videos(id, title, duration, url, winner) "
-        "VALUES (:id, :title, :duration, :url, :winner)",
+        "INSERT OR REPLACE INTO videos(id, title, duration, url, winner, members) "
+        "VALUES (:id, :title, :duration, :url, :winner, :members)",
         [
             {
                 "id":       e["id"],
@@ -124,6 +125,7 @@ def build(db_path: Path) -> None:
                 "duration": e.get("duration"),
                 "url":      e.get("url", ""),
                 "winner":   e.get("winner"),
+                "members":  1 if e.get("members") else 0,
             }
             for e in entries
         ],
