@@ -1,0 +1,38 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv/
+.venv_botc/
+venv/
+env/
+
+# ── Pipeline outputs (audio/video/large files) ────────────────────────────────
+outputs/
+
+# ── Sensitive / local-only ────────────────────────────────────────────────────
+cookies.txt
+nul
+
+# ── Large media files (safety net) ───────────────────────────────────────────
+*.wav
+*.mp3
+*.mp4
+*.mkv
+*.webm
+*.m4a
+
+# ── Backups & scratch ─────────────────────────────────────────────────────────
+_backups/
+*.bak
+
+# ── NeMo / diarization ────────────────────────────────────────────────────────
+nemo_experiments/
+*.rttm
+
+# ── Streamlit cache ───────────────────────────────────────────────────────────
+.streamlit/secrets.toml

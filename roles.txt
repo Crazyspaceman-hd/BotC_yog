@@ -1,0 +1,179 @@
+Acrobat
+Alchemist
+Alsaahir
+Amnesiac
+Artist
+Atheist
+Balloonist
+Banshee
+Bounty Hunter
+Cannibal
+Chambermaid
+Chef
+Choirboy
+Clockmaker
+Courtier
+Cult Leader
+Dreamer
+Empath
+Engineer
+Exorcist
+Farmer
+Fisherman
+Flowergirl
+Fool
+Fortune Teller
+Gambler
+General
+Gossip
+Grandmother
+High Priestess
+Huntsman
+Innkeeper
+Investigator
+Juggler
+King
+Knight
+Librarian
+Lycanthrope
+Magician
+Mathematician
+Mayor
+Minstrel
+Monk
+Nightwatchman
+Noble
+Oracle
+Pacifist
+Philosopher
+Pixie
+Poppy Grower
+Preacher
+Princess
+Professor
+Ravenkeeper
+Sage
+Sailor
+Savant
+Seamstress
+Shugenja
+Slayer
+Snake Charmer
+Soldier
+Steward
+Tea Lady
+Town Crier
+Undertaker
+Village Idiot
+Virgin
+Washerwoman
+Barber
+Butler
+Damsel
+Drunk
+Golem
+Goon
+Hatter
+Heretic
+Hermit
+Klutz
+Lunatic
+Moonchild
+Mutant
+Ogre
+Plague Doctor
+Politician
+Puzzlemaster
+Recluse
+Saint
+Snitch
+Sweetheart
+Tinker
+Zealot
+Assassin
+Baron
+Boffin
+Boomdandy
+Cerenovus
+Devil's Advocate
+Evil Twin
+Fearmonger
+Goblin
+Godfather
+Harpy
+Marionette
+Mastermind
+Mezepheles
+Organ Grinder
+Pit-Hag
+Poisoner
+Psychopath
+Scarlet Woman
+Spy
+Summoner
+Vizier
+Widow
+Witch
+Wizard
+Wraith
+Xaan
+Al-Hadikhia
+Fang Gu
+Imp
+Kazali
+Legion
+Leviathan
+Lil' Monsta
+Lleech
+Lord of Typhon
+No Dashii
+Ojo
+Po
+Pukka
+Riot
+Shabaloth
+Vigormortis
+Vortox
+Yaggababble
+Zombuul
+Apprentice
+Barista
+Beggar
+Bishop
+Bone Collector
+Bureaucrat
+Butcher
+Cacklejack
+Deviant
+Gangster
+Gnome
+Gunslinger
+Harlot
+Judge
+Matron
+Scapegoat
+Thief
+Voudon
+Angel
+Buddhist
+Deus ex Fiasco
+Djinn
+Doomsayer
+Duchess
+Ferryman
+Fibbin
+Fiddler
+Hell's Librarian
+Revolutionary
+Sentinel
+Spirit of Ivory
+Toymaker
+Big Wig
+Bootlegger
+Gardener
+Hindu
+Pope
+Storm Catcher
+Tor
+Ventriloquist
+Zenomancer

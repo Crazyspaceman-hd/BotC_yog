@@ -1,0 +1,7 @@
+
+# NeMo (diarization)
+nemo_toolkit[asr]
+omegaconf
+hydra-core
+torch
+torchaudio
