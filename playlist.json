@@ -278,7 +278,7 @@
       "url": "https://www.youtube.com/watch?v=ggM9BH__xtU",
       "status": "analyzed",
       "winner": null,
-      "members": true
+      "members": false
     },
     {
       "id": "GopTiY65CC0",
@@ -314,7 +314,7 @@
       "url": "https://www.youtube.com/watch?v=DzTk6kSIg-M",
       "status": "analyzed",
       "winner": "Evil",
-      "members": true
+      "members": false
     },
     {
       "id": "B0xdBZsADZ4",
@@ -341,7 +341,7 @@
       "url": "https://www.youtube.com/watch?v=IUO3Xz1kNkc",
       "status": "analyzed",
       "winner": "Evil",
-      "members": true
+      "members": false
     },
     {
       "id": "sByVy0JFi90",
@@ -377,7 +377,7 @@
       "url": "https://www.youtube.com/watch?v=nZ4CPKMrCnY",
       "status": "analyzed",
       "winner": null,
-      "members": true
+      "members": false
     },
     {
       "id": "DfPtc23EtGA",
@@ -430,7 +430,8 @@
       "duration": 2496,
       "url": "https://www.youtube.com/watch?v=OPqWyO7h-wM",
       "status": "analyzed",
-      "members": true
+      "members": false,
+      "winner": null
     },
     {
       "id": "QbzFmlScLSA",
@@ -466,7 +467,7 @@
       "url": "https://www.youtube.com/watch?v=nPAdvl7pySg",
       "status": "analyzed",
       "winner": "Good",
-      "members": true
+      "members": false
     },
     {
       "id": "DbF9CPOueTI",
