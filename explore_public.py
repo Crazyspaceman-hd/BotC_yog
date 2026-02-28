@@ -730,24 +730,24 @@ with tab_roster:
         "actual_role": "storyteller", "speaker": "speaker_0", "source": "system",
     }
 
-    # 5. Add remaining unlinked speakers from transcript (no player match found)
+    # 5. Collect unlinked speakers (in transcript but no player matched)
     linked_spks = {v["speaker"] for v in players.values() if v["speaker"]}
-    for spk in all_spks:
-        if spk not in linked_spks:
-            players[f"_unlinked_{spk}"] = {
-                "name": "", "believed_role": "", "actual_role": "",
-                "speaker": spk, "source": "unlinked",
-            }
+    unlinked_spks = [spk for spk in all_spks if spk not in linked_spks]
 
-    # Sort: speaker_0 first, then by speaker number
-    def _spk_ord(v: dict) -> int:
+    # Sort helper: system (speaker_0) first, linked players by speaker number,
+    # unlinked scraped players alphabetically at the end
+    def _player_sort(v: dict) -> tuple:
+        if v["source"] == "system":
+            return (0, -1, "")
         spk = v.get("speaker", "")
-        if spk == "speaker_0":
-            return -1
         try:
-            return int(spk.split("_")[1])
+            n = int(spk.split("_")[1])
         except Exception:
-            return 999
+            n = 999
+        return (1 if spk else 2, n, v["name"].lower())
+
+    # Only named players go in the main table
+    named_players = [v for v in players.values() if v.get("name")]
 
     df_ros = pd.DataFrame([
         {
@@ -764,7 +764,7 @@ with tab_roster:
             ),
             "source":        v["source"],
         }
-        for v in sorted(players.values(), key=_spk_ord)
+        for v in sorted(named_players, key=_player_sort)
     ])[["speaker", "name", "believed_role", "actual_role", "deceived", "source"]]
 
     def _style_src(row):
@@ -798,6 +798,17 @@ with tab_roster:
         use_container_width=True,
         hide_index=True,
     )
+
+    # Unlinked speakers — collapsed, secondary info
+    if unlinked_spks:
+        with st.expander(
+            f"⚠️ {len(unlinked_spks)} speaker(s) not yet identified "
+            f"({', '.join(unlinked_spks)}) — fix in explore.py"
+        ):
+            st.caption(
+                "These transcript speakers have no player assigned. "
+                "Open **explore.py → Fix Rosters** tab to link them."
+            )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
