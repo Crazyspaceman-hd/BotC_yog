@@ -90,6 +90,17 @@ CREATE TABLE IF NOT EXISTS roster (
 );
 CREATE INDEX IF NOT EXISTS idx_roster_vid ON roster(video_id);
 CREATE INDEX IF NOT EXISTS idx_roster_pn  ON roster(player_name);
+
+-- Manual speaker-to-player assignments (from roster_overrides.json)
+CREATE TABLE IF NOT EXISTS speaker_map (
+    rowid        INTEGER PRIMARY KEY,
+    video_id     TEXT NOT NULL REFERENCES videos(id),
+    speaker      TEXT NOT NULL,   -- "speaker_X"
+    name         TEXT,
+    actual_role  TEXT,
+    believed_role TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_spkmap_vid ON speaker_map(video_id);
 """
 
 
@@ -214,6 +225,30 @@ def build(db_path: Path) -> None:
             except Exception as exc:
                 print(f"  [WARN] roster {vid}: {exc}")
 
+    # ── speaker_map (from roster_overrides.json) ──────────────────────────────
+    spkmap_total = 0
+    for e in entries:
+        vid = e["id"]
+        overrides_json = Path("outputs") / vid / "roster_overrides.json"
+        if not overrides_json.exists():
+            continue
+        try:
+            overrides = json.loads(overrides_json.read_text(encoding="utf-8"))
+            con.execute("DELETE FROM speaker_map WHERE video_id = ?", (vid,))
+            rows = [
+                (vid, spk, ov.get("name", ""), ov.get("actual_role", ""), ov.get("believed_role", ""))
+                for spk, ov in overrides.items()
+                if ov.get("name")   # only store entries with a name assigned
+            ]
+            con.executemany(
+                "INSERT INTO speaker_map(video_id, speaker, name, actual_role, believed_role) "
+                "VALUES (?,?,?,?,?)",
+                rows,
+            )
+            spkmap_total += len(rows)
+        except Exception as exc:
+            print(f"  [WARN] speaker_map {vid}: {exc}")
+
     # ── rebuild FTS index ─────────────────────────────────────────────────────
     print("Rebuilding FTS index …")
     con.execute("INSERT INTO segments_fts(segments_fts) VALUES('rebuild')")
@@ -225,7 +260,7 @@ def build(db_path: Path) -> None:
     print(
         f"\nDone. Built {db_path}  ({size_kb:,} KB)\n"
         f"  lies={lies_total:,}   segments={segs_total:,}   "
-        f"roster_players={roster_total:,}"
+        f"roster_players={roster_total:,}   speaker_map={spkmap_total:,}"
     )
     print(f"  Built at: {datetime.now().isoformat(timespec='seconds')}")
 

@@ -159,6 +159,31 @@ def _load_overrides(video_id: str) -> dict:
 
 
 @st.cache_data
+def _load_speaker_map(video_id: str) -> dict:
+    """Load manual speaker-to-player assignments from the DB (speaker_map table).
+
+    Returns {speaker_id: {name, actual_role, believed_role}}.
+    Falls back to empty dict if the table doesn't exist yet.
+    """
+    if not DB_PATH.exists():
+        return {}
+    try:
+        con = sqlite3.connect(str(DB_PATH))
+        rows = con.execute(
+            "SELECT speaker, name, actual_role, believed_role "
+            "FROM speaker_map WHERE video_id=?",
+            (video_id,),
+        ).fetchall()
+        con.close()
+        return {
+            r[0]: {"name": r[1], "actual_role": r[2], "believed_role": r[3]}
+            for r in rows if r[1]
+        }
+    except Exception:
+        return {}
+
+
+@st.cache_data
 def _load_intro_roster(video_id: str) -> dict:
     """Load scraped intro roster from the database."""
     if not DB_PATH.exists():
@@ -335,6 +360,7 @@ with st.sidebar:
 segs         = _load_segments(video_id)
 lies         = _load_lies(video_id)
 overrides    = _load_overrides(video_id)
+speaker_map  = _load_speaker_map(video_id)
 intro_data   = _load_intro_roster(video_id)
 
 _roles_file = Path(f"outputs/{video_id}/roles.txt")
@@ -369,7 +395,8 @@ with st.sidebar:
     if intro_data:
         n_scraped = len(intro_data.get("players", []))
         st.write(f"**Scraped intro:** {n_scraped} player(s) 📷")
-    st.write(f"**Overrides saved:** {len(overrides)}")
+    _n_manual = len(overrides) or len(speaker_map)
+    st.write(f"**Manual assignments:** {_n_manual}")
     st.divider()
     st.caption(
         "To fix rosters or re-run analysis, use **explore.py** "
@@ -382,7 +409,7 @@ with st.sidebar:
 def _spk_label(spk: str) -> str:
     if spk == "speaker_0":
         return "Storyteller"
-    ov = overrides.get(spk)
+    ov = overrides.get(spk) or speaker_map.get(spk)
     if ov and ov.get("name"):
         role = ov.get("actual_role", "")
         return f"{ov['name']}" + (f"  ({role})" if role else "")
@@ -664,7 +691,16 @@ with tab_roster:
                 "source":        "system"       if spk == "speaker_0" else "unlinked",
             }
 
-    # 3. Overlay saved overrides
+    # 3. Overlay speaker_map from DB (persisted manual assignments; used by public app)
+    for spk, sm in speaker_map.items():
+        if sm.get("name"):
+            auto.setdefault(spk, {"name": "", "believed_role": "",
+                                  "actual_role": "", "source": "unlinked"})
+            if auto[spk].get("source") not in ("manual",):
+                auto[spk].update(sm)
+                auto[spk]["source"] = "manual"
+
+    # 4. Overlay local roster_overrides.json (highest priority; only present locally)
     for spk, ov in overrides.items():
         if ov.get("name"):
             auto.setdefault(spk, {"name": "", "believed_role": "",
@@ -672,7 +708,7 @@ with tab_roster:
             auto[spk].update(ov)
             auto[spk]["source"] = "manual"
 
-    # 4. Mark scraped entries
+    # 5. Mark scraped entries
     for spk, info in auto.items():
         name_lc = (info.get("name") or "").lower()
         if name_lc in scraped_lookup and info["source"] == "auto":
