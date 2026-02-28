@@ -16,8 +16,8 @@
       "duration": 3381,
       "url": "https://www.youtube.com/watch?v=z79AJOPoNi4",
       "status": "pending",
-      "members_only": true,
-      "members": false
+      "members": false,
+      "members_only": true
     },
     {
       "id": "sitpjTGSDhs",
@@ -474,7 +474,6 @@
       "duration": 4675,
       "url": "https://www.youtube.com/watch?v=DbF9CPOueTI",
       "status": "pending",
-      "members_only": true,
       "members": false
     }
   ]
