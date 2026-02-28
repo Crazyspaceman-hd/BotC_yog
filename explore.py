@@ -327,8 +327,25 @@ spk_labels = {s: _spk_label(s) for s in all_spks}
 # TABS
 # ══════════════════════════════════════════════════════════════════════════════
 
-tab_roster, tab_tx, tab_lies_tab, tab_stats, tab_aggregate = st.tabs(
-    ["🎭  Roster", "📜  Transcript", "🔍  Lie Analysis", "📊  Stats", "🌐  All Games"]
+# ── tab-jump helper (JS click is the only way without key= support) ───────────
+if st.session_state.pop("_goto_fix_tab", False):
+    import streamlit.components.v1 as _stc
+    _stc.html(
+        """<script>
+        (function(){
+          function click_tab(){
+            var btns = window.parent.document.querySelectorAll('button[data-baseweb="tab"]');
+            if(btns && btns.length > 5){ btns[5].click(); }
+            else { setTimeout(click_tab, 50); }
+          }
+          setTimeout(click_tab, 80);
+        })();
+        </script>""",
+        height=0,
+    )
+
+tab_roster, tab_tx, tab_lies_tab, tab_stats, tab_aggregate, tab_fix = st.tabs(
+    ["🎭  Roster", "📜  Transcript", "🔍  Lie Analysis", "📊  Stats", "🌐  All Games", "🔧  Fix Rosters"]
 )
 
 
@@ -1162,3 +1179,481 @@ with tab_aggregate:
                         f'</div>',
                         unsafe_allow_html=True,
                     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 6 — FIX ROSTERS  (slideshow of all intro_roster issues across every game)
+# ══════════════════════════════════════════════════════════════════════════════
+
+import re as _re
+
+_OUTPUTS_DIR = Path("outputs")
+
+# ── role aliases: themed / Christmas / Jingle Jam names → canonical BotC names ─
+# Add any game-specific pseudonyms here so they're never flagged as unknown roles.
+_ROLE_ALIASES: dict[str, str] = {
+    # Christmas / "Evil Santa" game (oN0pdPoVGhY)
+    "evil santa al-madikhia":   "al-hadikhia",
+    "al-madikhia":              "al-hadikhia",
+    "evil santa":               "al-hadikhia",
+    # add further aliases as new themed games appear
+}
+
+# Known canonical role names (used to catch OCR reading a role label as a player name,
+# e.g. "GRANDMOTHER" or "UNDERTAKER" appearing in the player_name field)
+_KNOWN_ROLES: frozenset[str] = frozenset({
+    "imp", "ojo", "vigormortis", "no dashii", "vortox", "fang gu",
+    "al-hadikhia", "lil monsta", "pukka", "po", "lleech", "shabaloth",
+    "zombuul", "legion", "riot", "lord of typhon",
+    "poisoner", "spy", "scarlet woman", "baron", "godfather", "assassin",
+    "devil's advocate", "evil twin", "witch", "cerenovus", "pit-hag",
+    "fearmonger", "marionette", "organ grinder", "mezepheles", "harpy",
+    "washerwoman", "librarian", "investigator", "chef", "empath",
+    "fortune teller", "undertaker", "monk", "ravenkeeper", "virgin",
+    "slayer", "soldier", "mayor", "butler", "drunk", "recluse", "saint",
+    "grandmother", "amnesiac", "noble", "lunatic", "fisherman", "clockmaker",
+    "dreamer", "seamstress", "philosopher", "artist", "juggler", "sage",
+    "mathematician", "flower girl", "town crier", "oracle", "savant",
+    "balloonist", "cannibal", "magician", "knight", "nightwatchman",
+    "pixie", "damsel", "heretic", "farmer", "acrobat", "innkeeper",
+    "gambler", "gossip", "chambermaid", "exorcist", "professor",
+    "necromancer", "huntsman", "poppy grower", "boomdandy", "ogre",
+    "puzzlemaster", "wizard", "steward", "king", "lycanthrope",
+    "snake charmer", "cult leader", "klutz", "banshee", "alchemist",
+    "princess", "courtier", "fool", "sweetheart", "tinker", "pacifist",
+    "vizier", "boffin", "alsaahir", "general", "minion", "demon",
+    "traveller", "traveler", "barista", "fiddler", "bishop", "bureaucrat",
+})
+
+# Roles that can legitimately receive a false token (told they are a different role).
+# Only these three should ever have believed_role != actual_role in the data.
+_DECEIVABLE_ROLES: frozenset[str] = frozenset({"drunk", "lunatic", "marionette"})
+
+# Garbled-name triggers:
+#   1. Contains a digit (e.g. "4 UNDEL")
+#   2. Starts with a single letter then a space (e.g. "T TOM", "T ALEX")
+#   3. Is itself a known role name (OCR read the role label instead of the player name)
+# We deliberately do NOT flag all-caps names (BARRY, ROSS, CRAIG are valid).
+_DIGIT_RE     = _re.compile(r"\d")
+_SINGLE_LTR_RE = _re.compile(r"^\w\s")   # "T TOM", "T ALEX"
+
+
+def _is_garbled(name: str) -> bool:
+    n = name.strip()
+    if not n:
+        return False
+    if _DIGIT_RE.search(n):           # has a digit
+        return True
+    if _SINGLE_LTR_RE.match(n):       # single-letter prefix
+        return True
+    if n.lower() in _KNOWN_ROLES:     # OCR read a role label as the player name
+        return True
+    return False
+
+
+_ISSUE_LABELS = {
+    "duplicate_role":      ("🔁", "#fde8d0", "Duplicate role"),
+    "unknown_role":        ("❓", "#e5e7eb", "Unknown / blank role"),
+    "garbled_name":        ("⚠️",  "#fef9c3", "Garbled player name"),
+    "wrong_believed_role": ("🎭", "#ddd6fe", "Wrong believed role (OCR artifact)"),
+}
+
+
+@st.cache_data
+def _all_roster_issues(entries_key: tuple) -> list[dict]:
+    """Scan every intro_roster.json for problems.
+    entries_key is a tuple of (video_id, title, members) for cache keying.
+    Role aliases are applied before checking so themed names are not flagged.
+    """
+    from collections import defaultdict
+
+    issues: list[dict] = []
+    seen:   set[tuple] = set()
+
+    for vid, title, members in entries_key:
+        roster_path = _OUTPUTS_DIR / vid / "intro_roster.json"
+        if not roster_path.exists():
+            continue
+        try:
+            players = json.loads(
+                roster_path.read_text(encoding="utf-8")
+            ).get("players", [])
+        except Exception:
+            continue
+
+        # Normalise roles through the alias map
+        for p in players:
+            for field in ("actual_role", "believed_role"):
+                raw = (p.get(field) or "").lower().strip()
+                p[field] = _ROLE_ALIASES.get(raw, raw)
+
+        # Per-video role counts (after alias normalisation)
+        role_counts:  dict[str, int]  = defaultdict(int)
+        role_players: dict[str, list] = defaultdict(list)
+        for p in players:
+            r = p.get("actual_role", "")
+            n = p.get("name", "")
+            if r and r != "unknown":
+                role_counts[r] += 1
+                role_players[r].append(n)
+
+        for p in players:
+            name   = p.get("name", "")
+            actual = p.get("actual_role", "")
+            bel    = p.get("believed_role", "")
+            ft     = float(p.get("frame_time", 0))
+            key    = (vid, name, actual, ft)
+            if key in seen:
+                continue
+
+            # 1. Duplicate role
+            if actual and actual != "unknown" and role_counts[actual] > 1:
+                conflicts = [x for x in role_players[actual] if x != name]
+                issues.append({
+                    "video_id": vid, "title": title, "members": members,
+                    "player_name": name, "actual_role": actual,
+                    "believed_role": bel, "frame_time": ft,
+                    "issue_type": "duplicate_role",
+                    "conflict_players": conflicts,
+                })
+                seen.add(key)
+                continue
+
+            # 2. Unknown / blank role (after alias resolution)
+            if not actual or actual == "unknown":
+                issues.append({
+                    "video_id": vid, "title": title, "members": members,
+                    "player_name": name, "actual_role": actual,
+                    "believed_role": bel, "frame_time": ft,
+                    "issue_type": "unknown_role",
+                    "conflict_players": [],
+                })
+                seen.add(key)
+                continue
+
+            # 3. Garbled player name
+            if _is_garbled(name):
+                issues.append({
+                    "video_id": vid, "title": title, "members": members,
+                    "player_name": name, "actual_role": actual,
+                    "believed_role": bel, "frame_time": ft,
+                    "issue_type": "garbled_name",
+                    "conflict_players": [],
+                })
+                seen.add(key)
+                continue
+
+            # 4. Wrong believed role — OCR picked up a second visible role on screen.
+            #    Only Drunk / Lunatic / Marionette can legitimately differ; for all
+            #    other roles a mismatch is an OCR artifact that should be corrected.
+            if (bel and bel != actual
+                    and actual not in _DECEIVABLE_ROLES):
+                issues.append({
+                    "video_id": vid, "title": title, "members": members,
+                    "player_name": name, "actual_role": actual,
+                    "believed_role": bel, "frame_time": ft,
+                    "issue_type": "wrong_believed_role",
+                    "conflict_players": [],
+                })
+                seen.add(key)
+
+    return issues
+
+
+def _first_line_for(video_id: str, player_name: str, frame_time: float = 0.0) -> str:
+    """Return the first spoken line for a player.
+
+    Strategy:
+      1. Look up the speaker in lie_analysis.csv (case-insensitive name match).
+      2. Find their earliest segment.
+      3. Fallback: if no speaker found, show transcript context around frame_time
+         (the moment the player's role card appeared in the intro).
+    """
+    lie_csv = _OUTPUTS_DIR / video_id / "lie_analysis.csv"
+    speaker = None
+
+    if lie_csv.exists():
+        try:
+            lies_df = pd.read_csv(lie_csv)
+            name_lc = player_name.lower().strip()
+            rows = lies_df[lies_df["player_name"].str.lower().str.strip() == name_lc]
+            if not rows.empty:
+                speaker = rows.iloc[0]["speaker"]
+        except Exception:
+            pass
+
+    segs = _load_segments(video_id)
+    if segs.empty:
+        return ""
+
+    if speaker:
+        spk_segs = segs[segs["speaker"] == speaker].sort_values("start")
+        if not spk_segs.empty:
+            return str(spk_segs.iloc[0]["text"])
+
+    # Fallback: show non-storyteller transcript context around the frame_time
+    if frame_time > 0:
+        window = segs[
+            (segs["start"] >= max(0, frame_time - 5))
+            & (segs["start"] <= frame_time + 30)
+            & (segs["speaker"] != "speaker_0")
+        ].sort_values("start")
+        if not window.empty:
+            row = window.iloc[0]
+            return f"[~{int(frame_time)}s] {row['text']}"
+
+    return ""
+
+
+with tab_fix:
+    _fix_entries = tuple(
+        (e["id"], e.get("title", e["id"]), e.get("members", False))
+        for e in (playlist if playlist else [])
+    )
+    all_issues = _all_roster_issues(_fix_entries)
+
+    if not all_issues:
+        st.success("No roster issues found — everything looks clean! 🎉")
+        st.stop()
+
+    # ── filters ───────────────────────────────────────────────────────────────
+    def _want_fix_tab():
+        st.session_state["_goto_fix_tab"] = True
+
+    col_f1, col_f2, col_f3 = st.columns(3)
+    with col_f1:
+        filter_type = st.multiselect(
+            "Issue type",
+            ["duplicate_role", "unknown_role", "garbled_name"],
+            default=["duplicate_role", "unknown_role", "garbled_name"],
+            format_func=lambda x: _ISSUE_LABELS[x][2],
+            key="fix_type_filter",
+            on_change=_want_fix_tab,
+        )
+    with col_f2:
+        filter_members = st.radio(
+            "Game type", ["All", "Main only", "Members only"],
+            horizontal=True, key="fix_mbr_filter",
+            on_change=_want_fix_tab,
+        )
+    with col_f3:
+        filter_vid = st.text_input("Filter by video ID / title", "",
+                                   key="fix_vid_filter",
+                                   on_change=_want_fix_tab)
+
+    filtered = [
+        iss for iss in all_issues
+        if iss["issue_type"] in filter_type
+        and (filter_members == "All"
+             or (filter_members == "Members only" and iss["members"])
+             or (filter_members == "Main only"    and not iss["members"]))
+        and (not filter_vid
+             or filter_vid.lower() in iss["video_id"].lower()
+             or filter_vid.lower() in iss["title"].lower())
+    ]
+
+    if not filtered:
+        st.info("No issues match the current filters.")
+        st.stop()
+
+    st.divider()
+
+    # ── session-state slide index ─────────────────────────────────────────────
+    if "fix_idx" not in st.session_state:
+        st.session_state["fix_idx"] = 0
+    idx = min(int(st.session_state["fix_idx"]), len(filtered) - 1)
+    st.session_state["fix_idx"] = idx
+
+    # ── navigation bar ────────────────────────────────────────────────────────
+    col_prev, col_prog, col_next = st.columns([1, 6, 1])
+    with col_prev:
+        if st.button("◀ Prev", disabled=(idx == 0), key="fix_prev"):
+            st.session_state["fix_idx"] = idx - 1
+            st.session_state["_goto_fix_tab"] = True
+    with col_next:
+        if st.button("Next ▶", disabled=(idx == len(filtered) - 1), key="fix_next"):
+            st.session_state["fix_idx"] = idx + 1
+            st.session_state["_goto_fix_tab"] = True
+
+    # Re-read idx after possible button update (no st.rerun() — avoids tab reset)
+    idx = min(int(st.session_state["fix_idx"]), len(filtered) - 1)
+
+    with col_prog:
+        st.progress((idx + 1) / len(filtered),
+                    text=f"Issue **{idx + 1}** of **{len(filtered)}**")
+
+    # ── current slide ─────────────────────────────────────────────────────────
+    iss    = filtered[idx]
+    icon, bg, label = _ISSUE_LABELS[iss["issue_type"]]
+    vid    = iss["video_id"]
+    title  = iss["title"]
+    mbr    = iss["members"]
+    name   = iss["player_name"]
+    actual = iss["actual_role"]
+    bel    = iss["believed_role"]
+    ft     = iss["frame_time"]
+
+    mbr_chip = (
+        '<span style="background:#7c3aed; color:#fff; padding:2px 8px; '
+        'border-radius:4px; font-size:12px; margin-right:6px;">🔒 Members</span>'
+        if mbr else
+        '<span style="background:#e5e7eb; color:#444; padding:2px 8px; '
+        'border-radius:4px; font-size:12px; margin-right:6px;">📺 Main</span>'
+    )
+    issue_chip = (
+        f'<span style="background:{bg}; color:#111; padding:2px 8px; '
+        f'border-radius:4px; font-size:12px;">{icon} {label}</span>'
+    )
+    st.markdown(f'<div style="margin-bottom:6px;">{mbr_chip}{issue_chip}</div>',
+                unsafe_allow_html=True)
+    st.markdown(f'### [{title}](https://www.youtube.com/watch?v={vid})')
+    st.caption(f"Video ID: `{vid}`")
+    st.divider()
+
+    col_card, col_edit = st.columns([3, 2])
+
+    with col_card:
+        # Conflict banner
+        if iss["issue_type"] == "duplicate_role":
+            st.markdown(
+                f'<div style="background:{bg}; color:#111; border-left:4px solid #f97316; '
+                f'padding:10px 14px; border-radius:6px; margin-bottom:10px;">'
+                f'<strong>{icon} Role conflict</strong><br>'
+                f'<code>{actual}</code> is also assigned to: '
+                f'<strong>{", ".join(iss["conflict_players"])}</strong>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+        # Player card
+        deceived = (actual in _DECEIVABLE_ROLES and bel and actual != bel)
+        st.markdown(
+            f'<div style="background:#f8fafc; color:#111; border:1px solid #e2e8f0; '
+            f'border-radius:8px; padding:14px 18px;">'
+            f'<div style="font-size:1.2em; font-weight:700; margin-bottom:6px;">👤 {name}</div>'
+            f'<div>Actual role: &nbsp;<strong>{actual or "—"}</strong></div>'
+            f'<div>Believed role: &nbsp;<strong>{bel or "—"}</strong>'
+            + (' &nbsp;⚠️ <em>(deceived)</em>' if deceived else '') +
+            f'</div>'
+            f'<div style="color:#666; font-size:0.85em; margin-top:6px;">'
+            f'Detected at: {ft:.1f}s &nbsp;|&nbsp; '
+            f'<a href="https://www.youtube.com/watch?v={vid}&t={int(ft)}s" '
+            f'target="_blank">▶ Jump to timestamp</a>'
+            f'</div></div>',
+            unsafe_allow_html=True,
+        )
+
+        # First spoken line (or context fallback)
+        st.markdown("**First spoken line in this game:**")
+        first_line = _first_line_for(vid, name, ft)
+        if first_line:
+            is_context = first_line.startswith("[~")
+            line_color = "#555" if is_context else "#0c4a6e"
+            border_color = "#94a3b8" if is_context else "#0ea5e9"
+            bg_color = "#f8fafc" if is_context else "#f0f9ff"
+            st.markdown(
+                f'<div style="background:{bg_color}; color:{line_color}; '
+                f'border-left:3px solid {border_color}; '
+                f'padding:8px 12px; border-radius:4px; font-style:italic; margin-top:4px;">'
+                f'"{first_line[:280]}"'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.caption("*(no transcript line found — player likely not in lie analysis)*")
+
+        # Conflict players' first lines
+        if iss["issue_type"] == "duplicate_role":
+            for cp in iss["conflict_players"]:
+                cp_line = _first_line_for(vid, cp, ft)
+                st.markdown(
+                    f'<div style="background:#fff7ed; color:#7c2d12; '
+                    f'border-left:3px solid #f97316; '
+                    f'padding:8px 12px; border-radius:4px; margin-top:8px;">'
+                    f'<strong>{cp}</strong><br>'
+                    f'<em>'
+                    + (f'"{cp_line[:200]}"' if cp_line else "(no transcript line)") +
+                    f'</em></div>',
+                    unsafe_allow_html=True,
+                )
+
+    # ── edit form ─────────────────────────────────────────────────────────────
+    with col_edit:
+        st.markdown("**✏️ Fix this entry**")
+        roster_path = _OUTPUTS_DIR / vid / "intro_roster.json"
+
+        with st.form(key=f"fix_{idx}_{vid}_{name}"):
+            new_name   = st.text_input("Player name", value=name)
+            new_actual = st.text_input("Actual role", value=actual)
+            new_bel    = st.text_input(
+                "Believed role (blank = same as actual)",
+                value=bel if bel != actual else "",
+            )
+            remove    = st.checkbox("Remove this entry entirely")
+            submitted = st.form_submit_button("💾 Save & next")
+
+        if submitted:
+            data    = json.loads(roster_path.read_text(encoding="utf-8"))
+            players = data.get("players", [])
+
+            if remove:
+                players = [
+                    p for p in players
+                    if not (
+                        p.get("name", "") == name
+                        and (p.get("actual_role") or "").lower() == actual
+                        and abs(float(p.get("frame_time", 0)) - ft) < 1.0
+                    )
+                ]
+            else:
+                matched = False
+                for p in players:
+                    if (
+                        p.get("name", "") == name
+                        and (p.get("actual_role") or "").lower() == actual
+                        and abs(float(p.get("frame_time", 0)) - ft) < 1.0
+                    ):
+                        p["name"]          = new_name.strip()
+                        p["actual_role"]   = new_actual.strip().lower()
+                        p["believed_role"] = (
+                            new_bel.strip().lower()
+                            if new_bel.strip() else new_actual.strip().lower()
+                        )
+                        matched = True
+                if not matched:
+                    st.error(f"Could not find entry to update (name={name!r}, role={actual!r}, t={ft})")
+
+            data["players"] = players
+            roster_path.write_text(
+                json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+            _all_roster_issues.clear()
+            _load_intro_roster.clear()
+            # Advance index — no st.rerun() needed; form submit triggers rerun automatically
+            next_idx = min(idx + 1, len(filtered) - 1)
+            st.session_state["fix_idx"] = next_idx
+            st.session_state["_goto_fix_tab"] = True
+            st.success(
+                f"✅ Saved!  "
+                f"Run `python analyze_roles.py {vid}` then `python build_db.py` to update the DB."
+            )
+
+    st.divider()
+
+    # ── summary table ─────────────────────────────────────────────────────────
+    with st.expander(f"📋 All {len(filtered)} issues (current filter)", expanded=False):
+        summary_rows = []
+        for i, iss2 in enumerate(filtered):
+            ico, _, lbl = _ISSUE_LABELS[iss2["issue_type"]]
+            summary_rows.append({
+                "#":       i + 1,
+                "Type":    f"{ico} {lbl}",
+                "Game":    iss2["title"][:50],
+                "Members": "🔒" if iss2["members"] else "",
+                "Player":  iss2["player_name"],
+                "Role":    iss2["actual_role"],
+                "Conflict": ", ".join(iss2["conflict_players"]),
+            })
+        st.dataframe(pd.DataFrame(summary_rows), use_container_width=True,
+                     hide_index=True)
+

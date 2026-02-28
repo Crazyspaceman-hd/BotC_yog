@@ -76,18 +76,35 @@ def _team(role: str) -> str:
 # ── table style helpers (no matplotlib needed) ───────────────────────────────
 _REDS_HIGH  = (220,  38,  38)   # red-600
 _BLUES_HIGH = ( 37,  99, 235)   # blue-600
-_CELL_TXT   = "color: white; text-shadow: 0 0 2px #000, 0 0 2px #000"
+
+# Dark text for light/pastel backgrounds (used in all fixed-colour style fns)
+_DARK_TXT   = "color: #111"
+# White + shadow text only for dark/saturated gradient cells
+_LIGHT_TXT  = "color: white; text-shadow: 0 0 3px #000, 0 0 3px #000"
+
+
+def _txt_for_bg(r: int, g: int, b: int) -> str:
+    """Return a legible CSS text-color for the given RGB background.
+
+    Uses the standard luminance formula: dark text on light backgrounds,
+    white (+ shadow) text on dark/saturated backgrounds.
+    """
+    lum = 0.299 * r + 0.587 * g + 0.114 * b
+    return _DARK_TXT if lum > 140 else _LIGHT_TXT
 
 
 def _color_scale(s, high=_REDS_HIGH):
-    """Gradient from white → high colour; no matplotlib required."""
+    """Gradient from white → high colour; no matplotlib required.
+
+    Text colour switches automatically so it stays legible across the range.
+    """
     mn, mx = s.min(), s.max()
     def _cell(v):
         t = (v - mn) / (mx - mn) if mx > mn else 0.0
         r = int(255 + t * (high[0] - 255))
         g = int(255 + t * (high[1] - 255))
         b = int(255 + t * (high[2] - 255))
-        return f"background-color: rgb({r},{g},{b}); {_CELL_TXT}"
+        return f"background-color: rgb({r},{g},{b}); {_txt_for_bg(r, g, b)}"
     return s.apply(_cell)
 
 
@@ -229,129 +246,6 @@ def _load_vocab(fn: str) -> list[str]:
     if not p.exists():
         return []
     return [l.strip() for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
-
-
-@st.cache_data
-def _load_all_roster_issues() -> list[dict]:
-    """Scan the DB for all roster problems across every game.
-
-    Returns a flat list of dicts, one per problematic player entry:
-      video_id, title, members, player_name, actual_role, believed_role,
-      frame_time, issue_type ('duplicate_role' | 'unknown_role' | 'garbled_name'),
-      conflict_players  (list of other players sharing the same role, for duplicates)
-    """
-    if not DB_PATH.exists():
-        return []
-    con = sqlite3.connect(str(DB_PATH))
-
-    # All roster rows annotated with per-(video,role) count
-    rows = con.execute("""
-        SELECT r.video_id, v.title, v.members,
-               r.player_name, r.actual_role, r.believed_role, r.frame_time,
-               COUNT(*) OVER (PARTITION BY r.video_id, r.actual_role) AS role_cnt
-        FROM roster r
-        JOIN videos v ON r.video_id = v.id
-        ORDER BY v.title, r.actual_role, r.frame_time
-    """).fetchall()
-    con.close()
-
-    # Build a quick lookup: (video_id, actual_role) -> [player_names]
-    from collections import defaultdict
-    role_players: dict[tuple, list] = defaultdict(list)
-    for row in rows:
-        vid, title, members, name, actual, believed, ft, cnt = row
-        if actual and actual not in ("unknown", ""):
-            role_players[(vid, actual)].append(name)
-
-    issues: list[dict] = []
-    seen: set[tuple] = set()          # avoid double-adding both sides of a duplicate
-
-    _garbled_re = __import__("re").compile(r"\d|\b[A-Z]{4,}\b")   # digits or all-caps 4+
-
-    for row in rows:
-        vid, title, members, name, actual, believed, ft, cnt = row
-        key = (vid, name, actual)
-        if key in seen:
-            continue
-
-        # 1. Duplicate role
-        if actual and actual not in ("unknown", "") and cnt > 1:
-            conflicts = [p for p in role_players[(vid, actual)] if p != name]
-            issues.append({
-                "video_id":        vid,
-                "title":           title,
-                "members":         bool(members),
-                "player_name":     name,
-                "actual_role":     actual,
-                "believed_role":   believed,
-                "frame_time":      ft,
-                "issue_type":      "duplicate_role",
-                "conflict_players": conflicts,
-            })
-            seen.add(key)
-            continue
-
-        # 2. Unknown / blank role
-        if not actual or actual == "unknown":
-            issues.append({
-                "video_id":        vid,
-                "title":           title,
-                "members":         bool(members),
-                "player_name":     name,
-                "actual_role":     actual or "",
-                "believed_role":   believed or "",
-                "frame_time":      ft,
-                "issue_type":      "unknown_role",
-                "conflict_players": [],
-            })
-            seen.add(key)
-            continue
-
-        # 3. Garbled player name
-        if _garbled_re.search(name or ""):
-            issues.append({
-                "video_id":        vid,
-                "title":           title,
-                "members":         bool(members),
-                "player_name":     name,
-                "actual_role":     actual,
-                "believed_role":   believed,
-                "frame_time":      ft,
-                "issue_type":      "garbled_name",
-                "conflict_players": [],
-            })
-            seen.add(key)
-
-    return issues
-
-
-@st.cache_data
-def _get_first_line(video_id: str, player_name: str) -> tuple[str, str]:
-    """Return (speaker_id, first_spoken_text) for a player in a game.
-
-    Looks up the speaker via lies table, then fetches the earliest segment.
-    Falls back to searching segments by partial name match if not in lies.
-    """
-    if not DB_PATH.exists():
-        return "", ""
-    con = sqlite3.connect(str(DB_PATH))
-    # Find speaker via lies table
-    spk_row = con.execute(
-        "SELECT speaker FROM lies WHERE video_id=? AND player_name=? LIMIT 1",
-        (video_id, player_name),
-    ).fetchone()
-    speaker = spk_row[0] if spk_row else None
-
-    text = ""
-    if speaker:
-        seg = con.execute(
-            "SELECT text FROM segments WHERE video_id=? AND speaker=? ORDER BY start LIMIT 1",
-            (video_id, speaker),
-        ).fetchone()
-        if seg:
-            text = seg[0]
-    con.close()
-    return speaker or "", text
 
 
 @st.cache_data
@@ -508,8 +402,8 @@ spk_labels = {s: _spk_label(s) for s in all_spks}
 # TABS
 # ══════════════════════════════════════════════════════════════════════════════
 
-tab_home, tab_roster, tab_tx, tab_lies_tab, tab_stats, tab_aggregate, tab_fix = st.tabs(
-    ["🏠  Home", "🎭  Roster", "📜  Transcript", "🔍  Lie Analysis", "📊  Stats", "🌐  All Games", "🔧  Fix Rosters"]
+tab_home, tab_roster, tab_tx, tab_lies_tab, tab_stats, tab_aggregate = st.tabs(
+    ["🏠  Home", "🎭  Roster", "📜  Transcript", "🔍  Lie Analysis", "📊  Stats", "🌐  All Games"]
 )
 
 
@@ -691,9 +585,9 @@ with tab_home:
 
         def _style_app(row):
             if row["As Evil"] > row["As Good"]:
-                return [f"background-color:#ffe4e6; {_CELL_TXT}"] * len(row)
+                return [f"background-color:#ffe4e6; {_DARK_TXT}"] * len(row)
             elif row["As Good"] > row["As Evil"]:
-                return [f"background-color:#dcfce7; {_CELL_TXT}"] * len(row)
+                return [f"background-color:#dcfce7; {_DARK_TXT}"] * len(row)
             return [""] * len(row)
 
         st.dataframe(
@@ -800,7 +694,7 @@ with tab_roster:
             bg = "#fef9c3"
         else:
             bg = "#ffe4e6"
-        return [f"background-color: {bg}; {_CELL_TXT}"] * len(row)
+        return [f"background-color: {bg}; {_DARK_TXT}"] * len(row)
 
     # Source legend
     st.markdown(
@@ -963,7 +857,7 @@ with tab_lies_tab:
     ]
 
     def _color_verdict(val: str) -> str:
-        return f"background-color: {VERDICT_BG.get(str(val), '#fff')}; {_CELL_TXT}"
+        return f"background-color: {VERDICT_BG.get(str(val), '#fff')}; {_DARK_TXT}"
 
     st.dataframe(
         view[display_cols].style.map(_color_verdict, subset=["verdict"]),
@@ -1140,7 +1034,7 @@ with tab_stats:
         conv_df = pd.DataFrame(conv_rows)
 
         def _color_type(val: str) -> str:
-            return f"background-color: {TYPE_COLORS.get(val, '#fff')}; {_CELL_TXT}"
+            return f"background-color: {TYPE_COLORS.get(val, '#fff')}; {_DARK_TXT}"
 
         st.dataframe(
             conv_df.style.map(_color_type, subset=["Type"]),
@@ -1233,9 +1127,9 @@ with tab_aggregate:
         def _style_winner(row):
             w = row.get("Winner", "")
             if w == "Evil":
-                return [f"background-color:#ffe4e6; {_CELL_TXT}"] * len(row)
+                return [f"background-color:#ffe4e6; {_DARK_TXT}"] * len(row)
             if w == "Good":
-                return [f"background-color:#dcfce7; {_CELL_TXT}"] * len(row)
+                return [f"background-color:#dcfce7; {_DARK_TXT}"] * len(row)
             return [""] * len(row)
 
         st.dataframe(
@@ -1422,7 +1316,7 @@ with tab_aggregate:
 
             def _style_team(row):
                 bg = "#ffe4e6" if row["Team"] == "Evil" else "#dcfce7"
-                return [f"background-color: {bg}; {_CELL_TXT}"] * len(row)
+                return [f"background-color: {bg}; {_DARK_TXT}"] * len(row)
 
             st.dataframe(
                 game_hist.style.apply(_style_team, axis=1),
@@ -1457,263 +1351,3 @@ with tab_aggregate:
                         unsafe_allow_html=True,
                     )
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 6 — FIX ROSTERS  (slideshow of all roster issues across every game)
-# ══════════════════════════════════════════════════════════════════════════════
-
-_ISSUE_LABELS = {
-    "duplicate_role": ("🔁", "#fde8d0", "Duplicate role"),
-    "unknown_role":   ("❓", "#e5e7eb", "Unknown / blank role"),
-    "garbled_name":   ("⚠️",  "#fef9c3", "Garbled player name"),
-}
-
-_OUTPUTS_DIR = Path("outputs")
-
-with tab_fix:
-    all_issues = _load_all_roster_issues()
-
-    if not all_issues:
-        st.success("No roster issues found — everything looks clean! 🎉")
-        st.stop()
-
-    # ── filter controls ───────────────────────────────────────────────────────
-    col_f1, col_f2, col_f3 = st.columns(3)
-    with col_f1:
-        filter_type = st.multiselect(
-            "Issue type",
-            ["duplicate_role", "unknown_role", "garbled_name"],
-            default=["duplicate_role", "unknown_role", "garbled_name"],
-            format_func=lambda x: _ISSUE_LABELS[x][2],
-        )
-    with col_f2:
-        filter_members = st.radio(
-            "Game type", ["All", "Main only", "Members only"], horizontal=True
-        )
-    with col_f3:
-        filter_vid = st.text_input("Filter by video ID / title", "")
-
-    filtered = [
-        iss for iss in all_issues
-        if iss["issue_type"] in filter_type
-        and (filter_members == "All"
-             or (filter_members == "Members only" and iss["members"])
-             or (filter_members == "Main only" and not iss["members"]))
-        and (not filter_vid
-             or filter_vid.lower() in iss["video_id"].lower()
-             or filter_vid.lower() in iss["title"].lower())
-    ]
-
-    if not filtered:
-        st.info("No issues match the current filters.")
-        st.stop()
-
-    st.divider()
-
-    # ── session-state index ───────────────────────────────────────────────────
-    if "fix_idx" not in st.session_state:
-        st.session_state["fix_idx"] = 0
-
-    # Clamp in case filters shrank the list
-    idx = min(st.session_state["fix_idx"], len(filtered) - 1)
-    st.session_state["fix_idx"] = idx
-
-    # ── navigation row ────────────────────────────────────────────────────────
-    col_prev, col_prog, col_next = st.columns([1, 6, 1])
-    with col_prev:
-        if st.button("◀ Prev", disabled=(idx == 0)):
-            st.session_state["fix_idx"] = idx - 1
-            st.rerun()
-    with col_next:
-        if st.button("Next ▶", disabled=(idx == len(filtered) - 1)):
-            st.session_state["fix_idx"] = idx + 1
-            st.rerun()
-    with col_prog:
-        st.progress((idx + 1) / len(filtered),
-                    text=f"Issue **{idx + 1}** of **{len(filtered)}**")
-
-    # ── current issue ─────────────────────────────────────────────────────────
-    iss    = filtered[idx]
-    icon, bg, label = _ISSUE_LABELS[iss["issue_type"]]
-    vid    = iss["video_id"]
-    title  = iss["title"]
-    mbr    = iss["members"]
-    name   = iss["player_name"]
-    actual = iss["actual_role"]
-    bel    = iss["believed_role"]
-    ft     = iss["frame_time"]
-
-    # members / game badge line
-    mbr_chip = (
-        '<span style="background:#7c3aed; color:#fff; padding:2px 8px; '
-        'border-radius:4px; font-size:12px; margin-right:6px;">🔒 Members</span>'
-        if mbr else
-        '<span style="background:#e5e7eb; color:#555; padding:2px 8px; '
-        'border-radius:4px; font-size:12px; margin-right:6px;">📺 Main</span>'
-    )
-    issue_chip = (
-        f'<span style="background:{bg}; color:#111; padding:2px 8px; '
-        f'border-radius:4px; font-size:12px;">{icon} {label}</span>'
-    )
-    st.markdown(
-        f'<div style="margin-bottom:6px;">{mbr_chip}{issue_chip}</div>',
-        unsafe_allow_html=True,
-    )
-
-    # title + YT link
-    st.markdown(
-        f'### [{title}](https://www.youtube.com/watch?v={vid})',
-    )
-    st.caption(f"Video ID: `{vid}`")
-
-    st.divider()
-
-    # ── issue detail card ─────────────────────────────────────────────────────
-    col_card, col_edit = st.columns([3, 2])
-
-    with col_card:
-        # Conflict summary for duplicate_role
-        if iss["issue_type"] == "duplicate_role":
-            conflict_str = " · ".join(iss["conflict_players"])
-            st.markdown(
-                f'<div style="background:{bg}; border-left:4px solid #f97316; '
-                f'padding:10px 14px; border-radius:6px; margin-bottom:10px;">'
-                f'<strong>{icon} Role conflict</strong><br>'
-                f'<code>{actual}</code> is also assigned to: '
-                f'<strong>{conflict_str}</strong>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-
-        # Player info box
-        deceived = actual != bel and bel and actual
-        st.markdown(
-            f'<div style="background:#f8fafc; border:1px solid #e2e8f0; '
-            f'border-radius:8px; padding:14px 18px;">'
-            f'<div style="font-size:1.2em; font-weight:700; margin-bottom:6px;">'
-            f'👤 {name}</div>'
-            f'<div>Actual role: &nbsp;<strong>{actual or "—"}</strong></div>'
-            f'<div>Believed role: &nbsp;<strong>{bel or "—"}</strong>'
-            + (f' &nbsp;⚠️ <em>(deceived)</em>' if deceived else '') +
-            f'</div>'
-            f'<div style="color:#888; font-size:0.85em; margin-top:6px;">'
-            f'Detected at: {ft:.1f}s &nbsp;|&nbsp; '
-            f'<a href="https://www.youtube.com/watch?v={vid}&t={int(ft)}s" '
-            f'target="_blank">▶ Jump to timestamp</a>'
-            f'</div>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-
-        # First spoken line
-        st.markdown("**First spoken line in this game:**")
-        speaker_id, first_line = _get_first_line(vid, name)
-        if first_line:
-            st.markdown(
-                f'<div style="background:#f0f9ff; border-left:3px solid #0ea5e9; '
-                f'padding:8px 12px; border-radius:4px; font-style:italic; '
-                f'color:#0c4a6e; margin-top:4px;">'
-                f'"{first_line[:280]}"'
-                + (f'<br><span style="font-size:0.8em; color:#666;">'
-                   f'Speaker: {speaker_id}</span>' if speaker_id else '') +
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-        else:
-            st.caption("*(no transcript line found — player may not appear in lie analysis)*")
-
-        # Other players in this game with the same role
-        if iss["issue_type"] == "duplicate_role" and iss["conflict_players"]:
-            st.markdown("**Other player(s) with the same role:**")
-            for cp in iss["conflict_players"]:
-                _, cp_line = _get_first_line(vid, cp)
-                st.markdown(
-                    f'<div style="background:#fff7ed; border-left:3px solid #f97316; '
-                    f'padding:8px 12px; border-radius:4px; font-style:italic; '
-                    f'color:#7c2d12; margin-top:4px;">'
-                    f'<strong>{cp}</strong>'
-                    + (f'<br>"{cp_line[:200]}"' if cp_line else
-                       '<br><em>(no transcript line found)</em>') +
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-
-    # ── edit form (only functional when outputs/ exists locally) ─────────────
-    with col_edit:
-        st.markdown("**✏️ Fix this entry**")
-
-        out_dir = _OUTPUTS_DIR / vid
-        can_save = out_dir.exists() and (out_dir / "intro_roster.json").exists()
-
-        if not can_save:
-            st.warning(
-                "Editing only works when running locally with `outputs/` present. "
-                "The deployed Streamlit Cloud version is read-only."
-            )
-
-        with st.form(key=f"fix_form_{idx}"):
-            new_name = st.text_input("Player name", value=name,
-                                     disabled=not can_save)
-            new_actual = st.text_input("Actual role", value=actual,
-                                       disabled=not can_save)
-            new_bel = st.text_input("Believed role (blank = same as actual)",
-                                    value=bel if bel != actual else "",
-                                    disabled=not can_save)
-            remove = st.checkbox("Remove this entry entirely",
-                                 disabled=not can_save)
-            submitted = st.form_submit_button(
-                "💾 Save & next",
-                disabled=not can_save,
-            )
-
-        if submitted and can_save:
-            roster_path = out_dir / "intro_roster.json"
-            data = json.loads(roster_path.read_text(encoding="utf-8"))
-            players = data.get("players", [])
-
-            if remove:
-                players = [p for p in players if not (
-                    p["name"] == name and p["actual_role"] == actual
-                    and abs(p.get("frame_time", 0) - ft) < 1.0
-                )]
-            else:
-                for p in players:
-                    if (p["name"] == name and p["actual_role"] == actual
-                            and abs(p.get("frame_time", 0) - ft) < 1.0):
-                        p["name"]         = new_name.strip()
-                        p["actual_role"]  = new_actual.strip().lower()
-                        p["believed_role"] = (
-                            new_bel.strip().lower() if new_bel.strip()
-                            else new_actual.strip().lower()
-                        )
-
-            data["players"] = players
-            roster_path.write_text(
-                json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
-            )
-            # Clear cache so the issue list refreshes
-            _load_all_roster_issues.clear()
-            _get_first_line.clear()
-            st.success(f"Saved! Re-run `analyze_roles.py {vid}` then `build_db.py` to update.")
-            # Advance to next issue
-            st.session_state["fix_idx"] = min(idx + 1, len(filtered) - 1)
-            st.rerun()
-
-    st.divider()
-
-    # ── summary table (all issues, current filters) ───────────────────────────
-    with st.expander(f"📋 All {len(filtered)} issues (current filter)", expanded=False):
-        summary_rows = []
-        for i, iss2 in enumerate(filtered):
-            ico, _, lbl = _ISSUE_LABELS[iss2["issue_type"]]
-            summary_rows.append({
-                "#":       i + 1,
-                "Type":    f"{ico} {lbl}",
-                "Game":    iss2["title"][:50],
-                "Members": "🔒" if iss2["members"] else "",
-                "Player":  iss2["player_name"],
-                "Role":    iss2["actual_role"],
-                "Conflict": ", ".join(iss2["conflict_players"]) if iss2["conflict_players"] else "",
-            })
-        st.dataframe(pd.DataFrame(summary_rows), use_container_width=True,
-                     hide_index=True)
