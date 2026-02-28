@@ -656,67 +656,116 @@ with tab_home:
 
 with tab_roster:
     st.markdown(
-        "Speaker-to-player mapping.  "
-        "**🔴 Red** = unlinked &nbsp; **🟡 Yellow** = auto-detected &nbsp; "
-        "**🟢 Green** = manually saved &nbsp; **📷 Blue** = scraped from video"
+        "Player roster — all data from the database.  "
+        "**🔴 Red** = unlinked speaker &nbsp; **🟡 Yellow** = auto-detected &nbsp; "
+        "**🟢 Green** = manually assigned &nbsp; **📷 Blue** = scraped from video intro"
     )
 
-    # Build scraped lookup: {lowercase name -> {believed, actual}}
-    scraped_lookup: dict[str, dict] = {}
-    for p in intro_data.get("players", []):
-        n = (p.get("name") or "").lower()
-        if n:
-            scraped_lookup[n] = p
+    # Build a unified player-centric roster from DB tables only.
+    # Priority: roster (ground-truth roles) → speaker_map (manual linking) → lies (auto)
+    players: dict[str, dict] = {}
 
-    # 1. Seed from lie_analysis (auto-detected)
-    auto: dict[str, dict] = {}
+    # 1. Seed from roster DB table (scraped video intro — ground truth for names + roles)
+    for p in intro_data.get("players", []):
+        name_raw = (p.get("name") or "").strip()
+        key      = name_raw.lower()
+        if key:
+            players[key] = {
+                "name":          name_raw,
+                "believed_role": (p.get("believed_role") or "").lower(),
+                "actual_role":   (p.get("actual_role")   or "").lower(),
+                "speaker":       "",
+                "source":        "scraped",
+            }
+
+    # 2. Link speakers to players via speaker_map (manual DB assignments)
+    for spk, sm in speaker_map.items():
+        name_raw = (sm.get("name") or "").strip()
+        key      = name_raw.lower()
+        if not key:
+            continue
+        if key in players:
+            players[key]["speaker"] = spk
+            players[key]["source"]  = "manual"
+            # Fill roles from speaker_map only if roster didn't supply them
+            if not players[key]["believed_role"]:
+                players[key]["believed_role"] = (sm.get("believed_role") or "").lower()
+            if not players[key]["actual_role"]:
+                players[key]["actual_role"] = (sm.get("actual_role") or "").lower()
+        else:
+            # In speaker_map but not in scraped roster — add as manual entry
+            players[key] = {
+                "name":          name_raw,
+                "believed_role": (sm.get("believed_role") or "").lower(),
+                "actual_role":   (sm.get("actual_role")   or "").lower(),
+                "speaker":       spk,
+                "source":        "manual",
+            }
+
+    # 3. Link remaining speakers via lies auto-detection
     if not lies.empty:
         for _, r in lies.drop_duplicates("speaker").iterrows():
+            spk  = r["speaker"]
             name = r["player_name"] if r["player_name"] != r["speaker"] else ""
-            auto[r["speaker"]] = {
-                "name":          name,
-                "believed_role": str(r.get("believed_role") or "").lower(),
-                "actual_role":   str(r.get("actual_role")   or "").lower(),
-                "source":        "auto" if name else "unlinked",
-            }
+            if not name:
+                continue
+            key = name.lower()
+            if key in players:
+                # Roster entry exists — just fill in the speaker link if missing
+                if not players[key]["speaker"]:
+                    players[key]["speaker"] = spk
+            else:
+                # Auto-detected player not in roster or speaker_map
+                players[key] = {
+                    "name":          name,
+                    "believed_role": str(r.get("believed_role") or "").lower(),
+                    "actual_role":   str(r.get("actual_role")   or "").lower(),
+                    "speaker":       spk,
+                    "source":        "auto",
+                }
 
-    # 2. Any speakers not in lie_analysis
+    # 4. Add Storyteller
+    players["_storyteller"] = {
+        "name": "Storyteller", "believed_role": "storyteller",
+        "actual_role": "storyteller", "speaker": "speaker_0", "source": "system",
+    }
+
+    # 5. Add remaining unlinked speakers from transcript (no player match found)
+    linked_spks = {v["speaker"] for v in players.values() if v["speaker"]}
     for spk in all_spks:
-        if spk not in auto:
-            label = "Storyteller" if spk == "speaker_0" else ""
-            auto[spk] = {
-                "name":          label,
-                "believed_role": "storyteller" if spk == "speaker_0" else "",
-                "actual_role":   "storyteller" if spk == "speaker_0" else "",
-                "source":        "system"       if spk == "speaker_0" else "unlinked",
+        if spk not in linked_spks:
+            players[f"_unlinked_{spk}"] = {
+                "name": "", "believed_role": "", "actual_role": "",
+                "speaker": spk, "source": "unlinked",
             }
 
-    # 3. Overlay speaker_map from DB (persisted manual assignments; used by public app)
-    for spk, sm in speaker_map.items():
-        if sm.get("name"):
-            auto.setdefault(spk, {"name": "", "believed_role": "",
-                                  "actual_role": "", "source": "unlinked"})
-            if auto[spk].get("source") not in ("manual",):
-                auto[spk].update(sm)
-                auto[spk]["source"] = "manual"
+    # Sort: speaker_0 first, then by speaker number
+    def _spk_ord(v: dict) -> int:
+        spk = v.get("speaker", "")
+        if spk == "speaker_0":
+            return -1
+        try:
+            return int(spk.split("_")[1])
+        except Exception:
+            return 999
 
-    # 4. Overlay local roster_overrides.json (highest priority; only present locally)
-    for spk, ov in overrides.items():
-        if ov.get("name"):
-            auto.setdefault(spk, {"name": "", "believed_role": "",
-                                  "actual_role": "", "source": "unlinked"})
-            auto[spk].update(ov)
-            auto[spk]["source"] = "manual"
-
-    # 5. Mark scraped entries
-    for spk, info in auto.items():
-        name_lc = (info.get("name") or "").lower()
-        if name_lc in scraped_lookup and info["source"] == "auto":
-            info["source"] = "scraped"
-
-    df_ros = pd.DataFrame(
-        [{"speaker": spk, **info} for spk, info in sorted(auto.items())]
-    )[["speaker", "name", "believed_role", "actual_role", "source"]]
+    df_ros = pd.DataFrame([
+        {
+            "speaker":       v["speaker"] or "—",
+            "name":          v["name"],
+            "believed_role": v["believed_role"],
+            "actual_role":   v["actual_role"],
+            "deceived":      (
+                "⚠️ Yes"
+                if (v["actual_role"] and v["believed_role"]
+                    and v["actual_role"] != v["believed_role"]
+                    and v["source"] != "system")
+                else ""
+            ),
+            "source":        v["source"],
+        }
+        for v in sorted(players.values(), key=_spk_ord)
+    ])[["speaker", "name", "believed_role", "actual_role", "deceived", "source"]]
 
     def _style_src(row):
         src = row["source"]
@@ -749,25 +798,6 @@ with tab_roster:
         use_container_width=True,
         hide_index=True,
     )
-
-    # Show scraped intro info if available
-    if scraped_lookup:
-        with st.expander(f"📷 Scraped intro data ({len(scraped_lookup)} entries)"):
-            scraped_rows = []
-            for p in intro_data.get("players", []):
-                deception = (
-                    "⚠️ Deceived" if p.get("actual_role") != p.get("believed_role")
-                    else "✓ Honest"
-                )
-                scraped_rows.append({
-                    "Name":          p.get("name", ""),
-                    "Believed Role": p.get("believed_role", ""),
-                    "Actual Role":   p.get("actual_role", ""),
-                    "Detected at":   f"{p.get('frame_time', 0):.1f}s",
-                    "Status":        deception,
-                })
-            st.dataframe(pd.DataFrame(scraped_rows), use_container_width=True,
-                         hide_index=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -962,7 +992,7 @@ with tab_stats:
     def _player_for(spk: str) -> str:
         if spk == "speaker_0":
             return "Storyteller"
-        ov = overrides.get(spk)
+        ov = overrides.get(spk) or speaker_map.get(spk)
         if ov and ov.get("name"):
             return ov["name"]
         if not lies.empty:
