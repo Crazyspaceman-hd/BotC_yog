@@ -28,7 +28,7 @@ Install these before anything else:
 
 - **Python 3.10+**
 - **ffmpeg** — must be on your `PATH` (used for audio extraction and resampling)
-- **yt-dlp** — installed via `requirements.txt`, but must also be available as a CLI command for member-only video auth
+- **yt-dlp** — installed via `requirements_pipeline.txt`, but must also be available as a CLI command for member-only video auth
 - **Tesseract** or **easyocr** — optional, required for the `scrape` step
 - **CUDA-capable GPU** — optional but strongly recommended for the `diarize` step (NeMo is very slow on CPU)
 
@@ -39,14 +39,18 @@ Install these before anything else:
 Two separate virtual environments are used to avoid dependency conflicts between the main pipeline and NeMo:
 
 ```bash
-# Main pipeline (download, transcribe, merge, patch, scrape, analyze, web UI)
+# Main pipeline (download, transcribe, merge, patch, scrape, analyze)
 python -m venv .venv
-.venv\Scripts\activate       # Windows
+.venv\Scripts\activate            # Windows
+pip install -r requirements_pipeline.txt
+
+# Web UI only (Streamlit apps)
+# Can share .venv above, or install separately:
 pip install -r requirements.txt
 
 # Diarization only (heavy GPU dependencies)
 python -m venv .venv_botc
-.venv_botc\Scripts\activate  # Windows
+.venv_botc\Scripts\activate       # Windows
 pip install -r d_requirements.txt
 ```
 
@@ -201,6 +205,15 @@ python calibrate_scraper.py <video_id> --window 300 # sample only the first 300 
 python calibrate_scraper.py <video_id> --hsv        # print dominant HSV values in badge area
 ```
 
+### build_db.py
+
+Rebuilds `botc.db` from all pipeline outputs. Run this after any `analyze_roles.py` or `scrape_intro.py` run to sync the database used by the web UI. Also imports `roster_overrides.json` (manual role edits from `explore.py`) into the `speaker_map` table.
+
+```bash
+python build_db.py           # rebuild botc.db (default)
+python build_db.py --db PATH # write to a custom DB path
+```
+
 ---
 
 ## Web UI
@@ -244,3 +257,4 @@ outputs/
 | `nemo_diar.yaml` | NeMo diarization hyperparameters (sample rate, clustering settings, model paths) |
 | `cookies.txt` | Netscape-format cookies for member-only YouTube video access (auto-detected if present) |
 | `playlist.json` | Cached playlist metadata and per-video processing status (written by `fetch_playlist.py`) |
+| `botc.db` | SQLite database — rebuilt by `build_db.py`; read by the web UI (`explore_public.py`) |
