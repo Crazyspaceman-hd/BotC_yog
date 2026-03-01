@@ -1256,6 +1256,7 @@ _ISSUE_LABELS = {
     "unknown_role":        ("❓", "#e5e7eb", "Unknown / blank role"),
     "garbled_name":        ("⚠️",  "#fef9c3", "Garbled player name"),
     "wrong_believed_role": ("🎭", "#ddd6fe", "Wrong believed role (OCR artifact)"),
+    "unlinked_speaker":    ("🔗", "#ffe4e6", "Unlinked speaker"),
 }
 
 
@@ -1357,6 +1358,86 @@ def _all_roster_issues(entries_key: tuple) -> list[dict]:
                 })
                 seen.add(key)
 
+    # ── 5. Unlinked speakers ──────────────────────────────────────────────────
+    # Find speaker IDs present in segments.csv but missing from roster_overrides.json.
+    # These represent players whose voices are in the diarization but haven't been
+    # linked to a player name, causing their role claims to remain UNVERIFIED.
+    import csv as _csv_mod
+
+    for vid, title, members in entries_key:
+        segs_path = _OUTPUTS_DIR / vid / "segments_patched.csv"
+        if not segs_path.exists():
+            segs_path = _OUTPUTS_DIR / vid / "segments.csv"
+        if not segs_path.exists():
+            continue
+
+        # Load existing roster assignments
+        ov_path = _OUTPUTS_DIR / vid / "roster_overrides.json"
+        overrides: dict = {}
+        if ov_path.exists():
+            try:
+                ov_raw = json.loads(ov_path.read_text(encoding="utf-8"))
+                overrides = {k: v for k, v in ov_raw.items()
+                             if v.get("name") and v["name"] != k and v["name"] != ""}
+            except Exception:
+                pass
+
+        # Known players from intro_roster.json for the dropdown
+        intro_players: list[dict] = []
+        intro_path = _OUTPUTS_DIR / vid / "intro_roster.json"
+        if intro_path.exists():
+            try:
+                assigned_lc = {v["name"].lower() for v in overrides.values()}
+                raw_players = json.loads(
+                    intro_path.read_text(encoding="utf-8")
+                ).get("players", [])
+                intro_players = [
+                    p for p in raw_players
+                    if p.get("name") and p["name"].lower() not in assigned_lc
+                ]
+            except Exception:
+                pass
+
+        # Scan segments for unlinked speakers
+        first_ts:     dict[str, float]      = {}
+        sample_lines: dict[str, list[tuple]] = {}
+        try:
+            with segs_path.open(encoding="utf-8", newline="") as f:
+                for row in _csv_mod.DictReader(f):
+                    spk = row.get("speaker", "")
+                    if not spk or spk in ("speaker_0", "UNKNOWN"):
+                        continue
+                    if spk in overrides:
+                        continue
+                    t = float(row.get("start", 0))
+                    if spk not in first_ts:
+                        first_ts[spk] = t
+                        sample_lines[spk] = []
+                    if len(sample_lines[spk]) < 4:
+                        sample_lines[spk].append((t, row.get("text", "")))
+        except Exception:
+            continue
+
+        for spk in sorted(first_ts.keys()):
+            key = (vid, spk, "unlinked_speaker")
+            if key in seen:
+                continue
+            seen.add(key)
+            issues.append({
+                "video_id":       vid,
+                "title":          title,
+                "members":        members,
+                "player_name":    spk,         # speaker ID used as stand-in
+                "actual_role":    "",
+                "believed_role":  "",
+                "frame_time":     first_ts[spk],
+                "issue_type":     "unlinked_speaker",
+                "conflict_players": [],
+                "speaker_id":     spk,
+                "sample_lines":   sample_lines.get(spk, []),
+                "known_players":  intro_players,
+            })
+
     return issues
 
 
@@ -1424,8 +1505,8 @@ with tab_fix:
     with col_f1:
         filter_type = st.multiselect(
             "Issue type",
-            ["duplicate_role", "unknown_role", "garbled_name"],
-            default=["duplicate_role", "unknown_role", "garbled_name"],
+            ["unlinked_speaker", "duplicate_role", "unknown_role", "garbled_name"],
+            default=["unlinked_speaker", "duplicate_role", "unknown_role", "garbled_name"],
             format_func=lambda x: _ISSUE_LABELS[x][2],
             key="fix_type_filter",
             on_change=_want_fix_tab,
@@ -1512,126 +1593,209 @@ with tab_fix:
 
     col_card, col_edit = st.columns([3, 2])
 
-    with col_card:
-        # Conflict banner
-        if iss["issue_type"] == "duplicate_role":
+    # ── unlinked speaker: completely different display + edit path ────────────
+    if iss["issue_type"] == "unlinked_speaker":
+        spk_id      = iss.get("speaker_id", name)
+        sample_lines = iss.get("sample_lines", [])
+        known_players = iss.get("known_players", [])
+
+        with col_card:
             st.markdown(
-                f'<div style="background:{bg}; color:#111; border-left:4px solid #f97316; '
-                f'padding:10px 14px; border-radius:6px; margin-bottom:10px;">'
-                f'<strong>{icon} Role conflict</strong><br>'
-                f'<code>{actual}</code> is also assigned to: '
-                f'<strong>{", ".join(iss["conflict_players"])}</strong>'
-                f'</div>',
+                f'<div style="background:#f8fafc; color:#111; border:1px solid #e2e8f0; '
+                f'border-radius:8px; padding:14px 18px;">'
+                f'<div style="font-size:1.2em; font-weight:700; margin-bottom:6px;">'
+                f'🎙️ <code>{spk_id}</code> — unidentified speaker</div>'
+                f'<div style="color:#666; font-size:0.85em;">'
+                f'First heard at: {ft:.1f}s &nbsp;|&nbsp; '
+                f'<a href="https://www.youtube.com/watch?v={vid}&t={int(max(0, ft-3))}s" '
+                f'target="_blank">▶ Jump to timestamp</a>'
+                f'</div></div>',
                 unsafe_allow_html=True,
             )
+            st.markdown("**Sample lines from this speaker:**")
+            if sample_lines:
+                for t_line, txt in sample_lines:
+                    st.markdown(
+                        f'<div style="background:#f0f9ff; color:#0c4a6e; '
+                        f'border-left:3px solid #0ea5e9; '
+                        f'padding:7px 12px; border-radius:4px; '
+                        f'font-style:italic; margin-top:5px; font-size:0.92em;">'
+                        f'<span style="color:#64748b; font-style:normal;">'
+                        f'{int(t_line//60):02d}:{t_line%60:05.2f}</span> &nbsp;'
+                        f'"{txt[:220]}"'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.caption("*(no transcript lines found for this speaker)*")
 
-        # Player card
-        deceived = (actual in _DECEIVABLE_ROLES and bel and actual != bel)
-        st.markdown(
-            f'<div style="background:#f8fafc; color:#111; border:1px solid #e2e8f0; '
-            f'border-radius:8px; padding:14px 18px;">'
-            f'<div style="font-size:1.2em; font-weight:700; margin-bottom:6px;">👤 {name}</div>'
-            f'<div>Actual role: &nbsp;<strong>{actual or "—"}</strong></div>'
-            f'<div>Believed role: &nbsp;<strong>{bel or "—"}</strong>'
-            + (' &nbsp;⚠️ <em>(deceived)</em>' if deceived else '') +
-            f'</div>'
-            f'<div style="color:#666; font-size:0.85em; margin-top:6px;">'
-            f'Detected at: {ft:.1f}s &nbsp;|&nbsp; '
-            f'<a href="https://www.youtube.com/watch?v={vid}&t={int(ft)}s" '
-            f'target="_blank">▶ Jump to timestamp</a>'
-            f'</div></div>',
-            unsafe_allow_html=True,
-        )
+        with col_edit:
+            st.markdown("**🔗 Assign to player**")
+            # Build dropdown options from the scraped intro players (unassigned ones)
+            player_lookup = {p["name"]: p for p in known_players if p.get("name")}
+            player_names  = ["— skip —"] + sorted(player_lookup.keys())
 
-        # First spoken line (or context fallback)
-        st.markdown("**First spoken line in this game:**")
-        first_line = _first_line_for(vid, name, ft)
-        if first_line:
-            is_context = first_line.startswith("[~")
-            line_color = "#555" if is_context else "#0c4a6e"
-            border_color = "#94a3b8" if is_context else "#0ea5e9"
-            bg_color = "#f8fafc" if is_context else "#f0f9ff"
-            st.markdown(
-                f'<div style="background:{bg_color}; color:{line_color}; '
-                f'border-left:3px solid {border_color}; '
-                f'padding:8px 12px; border-radius:4px; font-style:italic; margin-top:4px;">'
-                f'"{first_line[:280]}"'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-        else:
-            st.caption("*(no transcript line found — player likely not in lie analysis)*")
+            with st.form(key=f"fix_unlinked_{idx}_{vid}_{spk_id}"):
+                chosen = st.selectbox("Player", options=player_names)
+                # If player is in the scraped roster, auto-show their role
+                if chosen != "— skip —" and chosen in player_lookup:
+                    p_info = player_lookup[chosen]
+                    st.caption(
+                        f"Role from intro card: **{p_info.get('actual_role','?')}**"
+                        + (f" (believed: {p_info['believed_role']})"
+                           if p_info.get("believed_role") and
+                              p_info["believed_role"] != p_info.get("actual_role")
+                           else "")
+                    )
+                override_actual = st.text_input("Override actual role (optional)", value="")
+                submitted = st.form_submit_button("💾 Save & next")
 
-        # Conflict players' first lines
-        if iss["issue_type"] == "duplicate_role":
-            for cp in iss["conflict_players"]:
-                cp_line = _first_line_for(vid, cp, ft)
+            if submitted and chosen != "— skip —":
+                p_info  = player_lookup.get(chosen, {})
+                act     = override_actual.strip().lower() or (p_info.get("actual_role") or "").lower()
+                bel_out = (p_info.get("believed_role") or act).lower()
+
+                ov_path = _OUTPUTS_DIR / vid / "roster_overrides.json"
+                if ov_path.exists():
+                    ov_data = json.loads(ov_path.read_text(encoding="utf-8"))
+                else:
+                    ov_data = {}
+                ov_data[spk_id] = {"name": chosen, "actual_role": act, "believed_role": bel_out}
+                _save_overrides(vid, ov_data)
+                _all_roster_issues.clear()
+                next_idx = min(idx + 1, len(filtered) - 1)
+                st.session_state["fix_idx"] = next_idx
+                st.success(
+                    f"✅ Saved {spk_id} → {chosen}.  "
+                    f"Run `python analyze_roles.py {vid}` then `python build_db.py` to update the DB."
+                )
+            elif submitted and chosen == "— skip —":
+                # User wants to skip without assigning — just advance
+                next_idx = min(idx + 1, len(filtered) - 1)
+                st.session_state["fix_idx"] = next_idx
+
+    else:
+        # ── OCR quality issues: original display + edit path ─────────────────
+        with col_card:
+            # Conflict banner
+            if iss["issue_type"] == "duplicate_role":
                 st.markdown(
-                    f'<div style="background:#fff7ed; color:#7c2d12; '
-                    f'border-left:3px solid #f97316; '
-                    f'padding:8px 12px; border-radius:4px; margin-top:8px;">'
-                    f'<strong>{cp}</strong><br>'
-                    f'<em>'
-                    + (f'"{cp_line[:200]}"' if cp_line else "(no transcript line)") +
-                    f'</em></div>',
+                    f'<div style="background:{bg}; color:#111; border-left:4px solid #f97316; '
+                    f'padding:10px 14px; border-radius:6px; margin-bottom:10px;">'
+                    f'<strong>{icon} Role conflict</strong><br>'
+                    f'<code>{actual}</code> is also assigned to: '
+                    f'<strong>{", ".join(iss["conflict_players"])}</strong>'
+                    f'</div>',
                     unsafe_allow_html=True,
                 )
 
-    # ── edit form ─────────────────────────────────────────────────────────────
-    with col_edit:
-        st.markdown("**✏️ Fix this entry**")
-        roster_path = _OUTPUTS_DIR / vid / "intro_roster.json"
-
-        with st.form(key=f"fix_{idx}_{vid}_{name}"):
-            new_name   = st.text_input("Player name", value=name)
-            new_actual = st.text_input("Actual role", value=actual)
-            new_bel    = st.text_input(
-                "Believed role (blank = same as actual)",
-                value=bel if bel != actual else "",
+            # Player card
+            deceived = (actual in _DECEIVABLE_ROLES and bel and actual != bel)
+            st.markdown(
+                f'<div style="background:#f8fafc; color:#111; border:1px solid #e2e8f0; '
+                f'border-radius:8px; padding:14px 18px;">'
+                f'<div style="font-size:1.2em; font-weight:700; margin-bottom:6px;">👤 {name}</div>'
+                f'<div>Actual role: &nbsp;<strong>{actual or "—"}</strong></div>'
+                f'<div>Believed role: &nbsp;<strong>{bel or "—"}</strong>'
+                + (' &nbsp;⚠️ <em>(deceived)</em>' if deceived else '') +
+                f'</div>'
+                f'<div style="color:#666; font-size:0.85em; margin-top:6px;">'
+                f'Detected at: {ft:.1f}s &nbsp;|&nbsp; '
+                f'<a href="https://www.youtube.com/watch?v={vid}&t={int(ft)}s" '
+                f'target="_blank">▶ Jump to timestamp</a>'
+                f'</div></div>',
+                unsafe_allow_html=True,
             )
-            remove    = st.checkbox("Remove this entry entirely")
-            submitted = st.form_submit_button("💾 Save & next")
 
-        if submitted:
-            data    = json.loads(roster_path.read_text(encoding="utf-8"))
-            players = data.get("players", [])
-
-            if remove:
-                players = [
-                    p for p in players
-                    if not (
-                        p.get("name", "") == name
-                        and (p.get("actual_role") or "").lower() == actual
-                        and abs(float(p.get("frame_time", 0)) - ft) < 1.0
-                    )
-                ]
+            # First spoken line (or context fallback)
+            st.markdown("**First spoken line in this game:**")
+            first_line = _first_line_for(vid, name, ft)
+            if first_line:
+                is_context = first_line.startswith("[~")
+                line_color = "#555" if is_context else "#0c4a6e"
+                border_color = "#94a3b8" if is_context else "#0ea5e9"
+                bg_color = "#f8fafc" if is_context else "#f0f9ff"
+                st.markdown(
+                    f'<div style="background:{bg_color}; color:{line_color}; '
+                    f'border-left:3px solid {border_color}; '
+                    f'padding:8px 12px; border-radius:4px; font-style:italic; margin-top:4px;">'
+                    f'"{first_line[:280]}"'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
             else:
-                matched = False
-                for p in players:
-                    if (
-                        p.get("name", "") == name
-                        and (p.get("actual_role") or "").lower() == actual
-                        and abs(float(p.get("frame_time", 0)) - ft) < 1.0
-                    ):
-                        p["name"]          = new_name.strip()
-                        p["actual_role"]   = new_actual.strip().lower()
-                        p["believed_role"] = (
-                            new_bel.strip().lower()
-                            if new_bel.strip() else new_actual.strip().lower()
-                        )
-                        matched = True
-                if not matched:
-                    st.error(f"Could not find entry to update (name={name!r}, role={actual!r}, t={ft})")
+                st.caption("*(no transcript line found — player likely not in lie analysis)*")
 
-            data["players"] = players
-            roster_path.write_text(
-                json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
-            )
-            _all_roster_issues.clear()
-            _load_intro_roster.clear()
-            # Advance index — no st.rerun() needed; form submit triggers rerun automatically
-            next_idx = min(idx + 1, len(filtered) - 1)
-            st.session_state["fix_idx"] = next_idx
+            # Conflict players' first lines
+            if iss["issue_type"] == "duplicate_role":
+                for cp in iss["conflict_players"]:
+                    cp_line = _first_line_for(vid, cp, ft)
+                    st.markdown(
+                        f'<div style="background:#fff7ed; color:#7c2d12; '
+                        f'border-left:3px solid #f97316; '
+                        f'padding:8px 12px; border-radius:4px; margin-top:8px;">'
+                        f'<strong>{cp}</strong><br>'
+                        f'<em>'
+                        + (f'"{cp_line[:200]}"' if cp_line else "(no transcript line)") +
+                        f'</em></div>',
+                        unsafe_allow_html=True,
+                    )
+
+        # ── edit form for OCR issues ──────────────────────────────────────────
+        with col_edit:
+            st.markdown("**✏️ Fix this entry**")
+            roster_path = _OUTPUTS_DIR / vid / "intro_roster.json"
+
+            with st.form(key=f"fix_{idx}_{vid}_{name}"):
+                new_name   = st.text_input("Player name", value=name)
+                new_actual = st.text_input("Actual role", value=actual)
+                new_bel    = st.text_input(
+                    "Believed role (blank = same as actual)",
+                    value=bel if bel != actual else "",
+                )
+                remove    = st.checkbox("Remove this entry entirely")
+                submitted = st.form_submit_button("💾 Save & next")
+
+            if submitted:
+                data    = json.loads(roster_path.read_text(encoding="utf-8"))
+                players = data.get("players", [])
+
+                if remove:
+                    players = [
+                        p for p in players
+                        if not (
+                            p.get("name", "") == name
+                            and (p.get("actual_role") or "").lower() == actual
+                            and abs(float(p.get("frame_time", 0)) - ft) < 1.0
+                        )
+                    ]
+                else:
+                    matched = False
+                    for p in players:
+                        if (
+                            p.get("name", "") == name
+                            and (p.get("actual_role") or "").lower() == actual
+                            and abs(float(p.get("frame_time", 0)) - ft) < 1.0
+                        ):
+                            p["name"]          = new_name.strip()
+                            p["actual_role"]   = new_actual.strip().lower()
+                            p["believed_role"] = (
+                                new_bel.strip().lower()
+                                if new_bel.strip() else new_actual.strip().lower()
+                            )
+                            matched = True
+                    if not matched:
+                        st.error(f"Could not find entry to update (name={name!r}, role={actual!r}, t={ft})")
+
+                data["players"] = players
+                roster_path.write_text(
+                    json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+                )
+                _all_roster_issues.clear()
+                _load_intro_roster.clear()
+                # Advance index — no st.rerun() needed; form submit triggers rerun automatically
+                next_idx = min(idx + 1, len(filtered) - 1)
+                st.session_state["fix_idx"] = next_idx
             st.session_state["_goto_fix_tab"] = True
             st.success(
                 f"✅ Saved!  "
