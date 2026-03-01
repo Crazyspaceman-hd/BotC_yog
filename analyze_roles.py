@@ -29,6 +29,8 @@ import json
 import re
 from pathlib import Path
 
+from pipeline_utils import parse_rttm
+
 INTRO_CUTOFF   = 300.0        # seconds — used to build the initial roster
 STORYTELLER_ID = "speaker_0"  # diarization always assigns lead voice to spk_0
 
@@ -56,19 +58,6 @@ def load_segments(path: Path) -> list[dict]:
                 "text":    row["text"],
             })
     return rows
-
-
-def parse_rttm(path: Path) -> list[tuple[float, float, str]]:
-    turns = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        p = line.split()
-        if p[0] != "SPEAKER":
-            continue
-        start = float(p[3])
-        turns.append((start, start + float(p[4]), p[7]))
-    return turns
 
 
 def speaker_at(t: float, turns: list[tuple[float, float, str]]) -> str:

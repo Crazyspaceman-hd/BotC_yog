@@ -476,43 +476,28 @@ def deduplicate(detections: list[dict]) -> list[dict]:
 
 # ── CLI entry point ──────────────────────────────────────────────────────────
 
-def main(video_id: str = "lF96Jd3Eaeg",
-         debug: bool = False,
-         force: bool = False,
-         test_only: bool = False) -> None:
-    print("=== scrape_intro.py ===\n")
+_VIDEO_EXTS = ("mp4", "webm", "mkv", "avi", "mp4.webm")
 
-    # Initialise OCR once so the smoke-test uses the same instance
-    backend, reader = _init_ocr()
 
-    print("\n--- OCR smoke-test ---")
-    if backend:
-        test_ocr(backend, reader)
-    else:
-        print("  (no backend — skipping smoke-test)")
-    print()
-
-    if test_only:
-        return
-
+def _scrape_one(video_id: str, backend, reader,
+                debug: bool = False, force: bool = False) -> bool:
+    """Scrape a single video. Returns True on success, False on skip."""
     out_dir  = Path(f"outputs/{video_id}")
     out_json = out_dir / "intro_roster.json"
 
     if out_json.exists() and not force:
-        print("  intro_roster.json already exists — skipping "
-              "(use --force to overwrite)")
-        return
+        print(f"  [SKIP] intro_roster.json already exists (use --force to overwrite)")
+        return False
 
-    # Find video file — try common container extensions
     video_path = None
-    for ext in ("mp4", "webm", "mkv", "avi", "mp4.webm"):
+    for ext in _VIDEO_EXTS:
         p = out_dir / f"video.{ext}"
         if p.exists():
             video_path = p
             break
     if video_path is None:
         print(f"  [SKIP] No video file found in {out_dir}/ — run download first")
-        return
+        return False
 
     players    = load_lines(Path("players.txt"))
     roles_file = out_dir / "roles.txt"
@@ -544,6 +529,61 @@ def main(video_id: str = "lF96Jd3Eaeg",
         json.dumps(output, indent=2, ensure_ascii=False), encoding="utf-8"
     )
     print(f"\nWrote {len(entries)} entries -> {out_json}")
+    return True
+
+
+def _init_ocr_with_test():
+    """Initialise OCR and run smoke-test. Returns (backend, reader)."""
+    backend, reader = _init_ocr()
+    print("\n--- OCR smoke-test ---")
+    if backend:
+        test_ocr(backend, reader)
+    else:
+        print("  (no backend — skipping smoke-test)")
+    print()
+    return backend, reader
+
+
+def main(video_id: str = "lF96Jd3Eaeg",
+         debug: bool = False,
+         force: bool = False,
+         test_only: bool = False) -> None:
+    print("=== scrape_intro.py ===\n")
+    backend, reader = _init_ocr_with_test()
+    if test_only:
+        return
+    _scrape_one(video_id, backend, reader, debug=debug, force=force)
+
+
+def main_all(debug: bool = False, force: bool = False) -> None:
+    """Scrape all videos that have a downloaded video file, reusing one OCR instance."""
+    outputs = Path("outputs")
+    video_ids = sorted(
+        d.name for d in outputs.iterdir()
+        if d.is_dir() and any((d / f"video.{ext}").exists() for ext in _VIDEO_EXTS)
+    )
+    print(f"=== scrape_intro.py --all ===\n")
+    print(f"Found {len(video_ids)} video(s) with downloaded video files.")
+
+    backend, reader = _init_ocr_with_test()
+    print(f"OCR backend: {backend}\n")
+
+    ok, skipped, errors = 0, 0, []
+    for i, vid in enumerate(video_ids, 1):
+        print(f"\n[{i}/{len(video_ids)}] {vid}")
+        try:
+            if _scrape_one(vid, backend, reader, debug=debug, force=force):
+                ok += 1
+            else:
+                skipped += 1
+        except Exception as exc:
+            print(f"  ERROR: {exc}")
+            errors.append((vid, exc))
+
+    print(f"\n{'=' * 60}")
+    print(f"Done.  {ok} scraped  |  {skipped} skipped  |  {len(errors)} failed")
+    if errors:
+        print("Failed:", [v for v, _ in errors])
 
 
 if __name__ == "__main__":
@@ -551,7 +591,9 @@ if __name__ == "__main__":
         description="Scrape player intro roster from BotC video UI overlays"
     )
     ap.add_argument("video_id", nargs="?", default="lF96Jd3Eaeg",
-                    help="YouTube video ID")
+                    help="YouTube video ID (omit when using --all)")
+    ap.add_argument("--all", action="store_true", dest="all_videos",
+                    help="Scrape all videos that have a downloaded video file")
     ap.add_argument("--debug", action="store_true",
                     help="Save cropped debug images to outputs/<id>/intro_debug/")
     ap.add_argument("--force", action="store_true",
@@ -559,4 +601,7 @@ if __name__ == "__main__":
     ap.add_argument("--test", action="store_true",
                     help="Initialise OCR, run smoke-test, then exit (no video needed)")
     args = ap.parse_args()
-    main(args.video_id, debug=args.debug, force=args.force, test_only=args.test)
+    if args.all_videos:
+        main_all(debug=args.debug, force=args.force)
+    else:
+        main(args.video_id, debug=args.debug, force=args.force, test_only=args.test)

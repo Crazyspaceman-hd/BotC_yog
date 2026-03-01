@@ -185,14 +185,8 @@ python patch_transcript.py <video_id>
 python scrape_intro.py <video_id>
 python scrape_intro.py <video_id> --debug   # also save cropped debug images to intro_debug/
 python scrape_intro.py <video_id> --force   # overwrite existing intro_roster.json
-```
-
-### run_scrape_all.py
-
-Batch-runs `scrape_intro.py` across all video IDs found in `outputs/`:
-
-```bash
-python run_scrape_all.py
+python scrape_intro.py --all                # batch-scrape all videos found in outputs/
+python scrape_intro.py --all --force        # batch-scrape, overwriting existing results
 ```
 
 ### analyze_roles.py
