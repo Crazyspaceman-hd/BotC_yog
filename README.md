@@ -51,7 +51,7 @@ pip install -r requirements.txt
 # Diarization only (heavy GPU dependencies)
 python -m venv .venv_botc
 .venv_botc\Scripts\activate       # Windows
-pip install -r d_requirements.txt
+pip install -r requirements_nemo.txt
 ```
 
 Use `.venv` for all steps except `diarize`. Switch to `.venv_botc` when running `diarize_nemo.py` or the `diarize` step through `run_pipeline.py`.
@@ -187,10 +187,19 @@ python scrape_intro.py <video_id> --debug   # also save cropped debug images to 
 python scrape_intro.py <video_id> --force   # overwrite existing intro_roster.json
 ```
 
+### run_scrape_all.py
+
+Batch-runs `scrape_intro.py` across all video IDs found in `outputs/`:
+
+```bash
+python run_scrape_all.py
+```
+
 ### analyze_roles.py
 
 ```bash
 python analyze_roles.py <video_id>
+python analyze_roles.py --all        # process all games found in outputs/
 ```
 
 ### calibrate_scraper.py

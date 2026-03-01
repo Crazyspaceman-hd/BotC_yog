@@ -36,3 +36,7 @@ nemo_experiments/
 
 # ── Streamlit cache ───────────────────────────────────────────────────────────
 .streamlit/secrets.toml
+
+# ── Local tooling / IDE ────────────────────────────────────────────────────────
+.claude/
+Pictures/
