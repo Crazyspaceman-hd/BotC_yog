@@ -51,6 +51,7 @@ _SOURCE_STYLE = {
     "manual":           ("🟢", "#dcfce7"),
     "scraped":          ("📷", "#e0f2fe"),
     "auto":             ("🟡", "#fef9c3"),
+    "auto_timing":      ("⏱️",  "#fef3c7"),
     "scraped_unlinked": ("⚠️",  "#fde8d0"),
     "unlinked":         ("🔴", "#ffe4e6"),
 }
@@ -775,7 +776,7 @@ with tab_roster:
             bg = "#dcfce7"
         elif src == "scraped":
             bg = "#e0f2fe"
-        elif src == "auto":
+        elif src in ("auto", "auto_timing"):
             bg = "#fef9c3"
         else:
             bg = "#ffe4e6"

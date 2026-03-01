@@ -212,6 +212,73 @@ def build_roster(
     return roster
 
 
+# ── intro-timing speaker linker ───────────────────────────────────────────────
+
+def link_speakers_from_intro_timing(
+    scraped:     dict[str, dict],         # {name_lower: {name, frame_time, ...}}
+    rttm_turns:  list[tuple[float, float, str]],
+    existing:    dict[str, dict],         # already-linked roster {speaker_id: info}
+    st_id:       str  = STORYTELLER_ID,
+    win_before:  float = 25.0,            # seconds before card appears
+    win_after:   float = 5.0,             # seconds after card appears
+    min_coverage: float = 0.40,           # fraction of window the speaker must occupy
+) -> dict[str, str]:
+    """
+    For each scraped player card (sorted by frame_time), find the diarization
+    speaker that dominates the audio window just before the card appears on
+    screen.  Players record solo intro monologues which are edited into the
+    video; their card typically appears mid-monologue, so we look [ft-25, ft+5].
+
+    Returns {speaker_id: player_name} for newly-inferred links only.
+    Already-linked speakers are excluded so manual overrides always win.
+    """
+    linked = set(existing.keys()) | {st_id}
+    result: dict[str, str] = {}
+    already_named = {info.get("name", "").lower() for info in existing.values()}
+
+    players_by_time = sorted(
+        [(info["frame_time"], name_lc, info)
+         for name_lc, info in scraped.items()
+         if info.get("frame_time", 0) > 0],
+        key=lambda x: x[0],
+    )
+
+    for frame_time, name_lc, info in players_by_time:
+        name = info["name"]
+        if name_lc in already_named or name_lc in {v.lower() for v in result.values()}:
+            continue
+
+        win_s = frame_time - win_before
+        win_e = frame_time + win_after
+        win_len = win_e - win_s
+
+        # Accumulate speaking time per unlinked speaker within the window
+        time_in_win: dict[str, float] = {}
+        for s, e, spk in rttm_turns:
+            if spk in linked or spk in result:
+                continue
+            overlap = max(0.0, min(e, win_e) - max(s, win_s))
+            if overlap > 0:
+                time_in_win[spk] = time_in_win.get(spk, 0.0) + overlap
+
+        if not time_in_win:
+            continue
+
+        best_spk = max(time_in_win, key=time_in_win.__getitem__)
+        coverage = time_in_win[best_spk] / win_len if win_len > 0 else 0
+
+        if coverage < min_coverage:
+            continue  # not confident enough
+
+        result[best_spk] = name
+        linked.add(best_spk)
+        already_named.add(name_lc)
+        print(f"  [intro_timing] {name:20s}  ->  {best_spk}"
+              f"  (coverage {coverage:.0%})")
+
+    return result
+
+
 # ── scraped intro roster integration ─────────────────────────────────────────
 
 def load_intro_roster(out_dir: Path) -> dict[str, dict]:
@@ -595,9 +662,34 @@ def main(video_id: str = "lF96Jd3Eaeg") -> None:
     print("Building intro roster from transcript ...")
     roster = build_roster(segments, players, roles, rttm_turns)
 
-    # ── A2: apply manual overrides from explore.py (name→speaker linkage) ───────
-    # Apply BEFORE scraped data so scraped roles can override pre-scraper guesses.
+    # ── A1: intro-timing fallback ─────────────────────────────────────────────
+    # For speakers not yet linked by NLP, use the frame_time of each player's
+    # intro card to infer which speaker they are.  Works well when each player
+    # records a solo monologue that is edited into the video (common format).
     scraped = load_intro_roster(out_dir)
+    if scraped and rttm_turns:
+        timing_links = link_speakers_from_intro_timing(scraped, rttm_turns, roster)
+        for spk, name in timing_links.items():
+            if spk not in roster:
+                # Find role from scraped data
+                info = scraped.get(name.lower(), {})
+                roster[spk] = {
+                    "name":               name,
+                    "believed_role":      (info.get("believed_role") or "unknown").lower(),
+                    "actual_role":        (info.get("actual_role")   or "unknown").lower(),
+                    "initial_actual_role": (info.get("actual_role")  or "unknown").lower(),
+                    "role_history":       [],
+                    "source":             "auto_timing",
+                }
+
+    # Update roles for NLP-linked speakers using scraped OCR data (more accurate
+    # than transcript-guessed roles, especially for deception like Drunk/Marionette).
+    # Must run BEFORE manual overrides so the manual values still win.
+    if scraped:
+        apply_intro_roster(roster, scraped)
+
+    # ── A2: apply manual overrides from explore.py (name→speaker linkage) ───────
+    # Applied LAST so manual values always override auto/scraped guesses.
     overrides_file = out_dir / "roster_overrides.json"
     if overrides_file.exists():
         overrides = json.loads(overrides_file.read_text(encoding="utf-8"))
