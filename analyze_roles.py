@@ -828,6 +828,36 @@ def main(video_id: str = "lF96Jd3Eaeg") -> None:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Analyze roles and detect lies")
-    ap.add_argument("video_id", nargs="?", default="lF96Jd3Eaeg",
-                    help="YouTube video ID")
-    main(ap.parse_args().video_id)
+    ap.add_argument("video_id", nargs="?", default=None,
+                    help="YouTube video ID (omit with --all to process every game)")
+    ap.add_argument("--all", action="store_true",
+                    help="Process all games that have segments + diarization output")
+    args = ap.parse_args()
+
+    if args.all:
+        outputs = Path("outputs")
+        video_ids = sorted(
+            d.name for d in outputs.iterdir()
+            if d.is_dir()
+            and (d / "diarization.rttm").exists()
+            and ((d / "segments_patched.csv").exists() or (d / "segments.csv").exists())
+        )
+        if not video_ids:
+            print("No processable games found under outputs/")
+        else:
+            print(f"Processing {len(video_ids)} games...\n")
+            errors = []
+            for vid in video_ids:
+                print(f"\n{'='*60}")
+                print(f"  {vid}")
+                print(f"{'='*60}")
+                try:
+                    main(vid)
+                except Exception as exc:
+                    print(f"  [ERROR] {exc}")
+                    errors.append((vid, exc))
+            print(f"\nDone. {len(video_ids) - len(errors)} OK, {len(errors)} errors.")
+            for vid, exc in errors:
+                print(f"  {vid}: {exc}")
+    else:
+        main(args.video_id or "lF96Jd3Eaeg")
