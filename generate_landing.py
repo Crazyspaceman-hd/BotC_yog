@@ -1275,52 +1275,11 @@ body.mc #theme-toggle:hover {{
 body.mc #theme-toggle:active {{
   box-shadow: inset 3px 3px 0 #2d2d2d, inset -3px -3px 0 #cfcfcf;
 }}
-#goblin-toggle {{
-  position: fixed;
-  top: 12px;
-  right: 120px;
-  z-index: 9999;
-  background: #1a2a1a;
-  border: 1px solid #2a452a;
-  color: #86efac;
-  font-size: 0.8rem;
-  font-weight: 700;
-  padding: 8px 14px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background .15s, transform .1s;
-  letter-spacing: .02em;
-  line-height: 1;
-}}
-#goblin-toggle:hover {{ background: #243824; transform: translateY(-1px); }}
-#goblin-toggle.goblin-active {{
-  background: #1a4020;
-  border-color: #3a6a3a;
-  color: #4ade80;
-}}
-body.mc #goblin-toggle {{
-  background: #005500;
-  border: none;
-  box-shadow: inset -3px -3px 0 #002200, inset 3px 3px 0 #44aa44;
-  color: #88ff88;
-  font-family: 'Press Start 2P', monospace;
-  border-radius: 0;
-  font-size: 0.55rem;
-  padding: 10px 14px;
-  letter-spacing: 0.05em;
-  transition: background .1s;
-  transform: none;
-}}
-body.mc #goblin-toggle.goblin-active {{
-  background: #007700;
-  box-shadow: inset -3px -3px 0 #004400, inset 3px 3px 0 #66ff66;
-}}
 </style>
 </head>
 <body>
 
 <button id="theme-toggle" onclick="toggleTheme()">⛏ MC Mode</button>
-<button id="goblin-toggle" onclick="toggleGoblin()">🐊 Show Goblin</button>
 
 <header>
   <div class="hero-title">🏰 Blood on the Clocktower</div>
@@ -1450,24 +1409,14 @@ body.mc #goblin-toggle.goblin-active {{
 
 <script>
 const DATA    = {data_json};
-const DATA_NG = {data_ng_json};
 const GAMES   = {games_json};
 const EXPLORER = "{explorer_url}";
 
-// Default: no-goblin dataset (cleaner stats)
-let ACTIVE = DATA_NG;
 
 // ── theme globals & helpers ───────────────────────────────────────────────────
 let _donutChart = null;
 let _barChart   = null;
 
-function toggleGoblin() {{
-  ACTIVE = (ACTIVE === DATA_NG) ? DATA : DATA_NG;
-  const showing = (ACTIVE === DATA);
-  const btn = document.getElementById('goblin-toggle');
-  if (btn) btn.textContent = showing ? '🐊 Hide Goblin' : '🐊 Show Goblin';
-  renderAll();
-}}
 
 function updateChartTheme() {{
   const isMC  = document.body.classList.contains('mc');
@@ -1511,7 +1460,7 @@ function toggleTheme() {{
 
 // ── wins scoreboard ────────────────────────────────────────────────────────────
 function renderWins() {{
-  const w = ACTIVE.wins || {{good: 0, evil: 0}};
+  const w = DATA.wins || {{good: 0, evil: 0}};
   const board = document.getElementById("wins-board");
   if (board) {{
     board.innerHTML =
@@ -1539,7 +1488,7 @@ renderWins();
 
 // ── stat bubbles ──────────────────────────────────────────────────────────────
 function renderStatBubbles() {{
-  const s = ACTIVE.summary;
+  const s = DATA.summary;
   const lie_rate = s.claims > 0 ? (s.lies / s.claims * 100).toFixed(1) + "%" : "—";
   const items = [
     [s.games,   "Games"],
@@ -1560,7 +1509,7 @@ renderStatBubbles();
 
 // ── superlatives ──────────────────────────────────────────────────────────────
 function renderSuperlatives() {{
-  const sup = ACTIVE.superlatives;
+  const sup = DATA.superlatives;
   const cards = [
     {{
       key: "most_evil", icon: "😈", label: "Most Often Evil",
@@ -1645,7 +1594,7 @@ renderSuperlatives();
 
 // ── doughnut chart ────────────────────────────────────────────────────────────
 function renderDonut() {{
-  const s = ACTIVE.summary;
+  const s = DATA.summary;
   if (_donutChart) {{
     _donutChart.data.datasets[0].data = [s.lies, s.true, s.unverified, s.hm];
     _donutChart.options.plugins.tooltip.callbacks.label =
@@ -1689,7 +1638,7 @@ renderDonut();
 
 // ── horizontal bar chart (top liars) ──────────────────────────────────────────
 function renderBarChart() {{
-  const liars = ACTIVE.top_liars;
+  const liars = DATA.top_liars;
   if (!liars.length) return;
   const labels = liars.map(x => x.name);
   const lies   = liars.map(x => x.lies);
@@ -1751,7 +1700,7 @@ function renderFakeRoles() {{
   const tbody = document.getElementById("fake-roles-body");
 
   function render() {{
-    const rows = ACTIVE.fake_roles || [];
+    const rows = DATA.fake_roles || [];
     if (!rows.length) {{
       tbody.innerHTML = `<tr><td colspan="4" class="empty">No lie data yet.</td></tr>`;
       return;
@@ -1823,9 +1772,9 @@ function renderRoles() {{
     render();
   }}
 
-  const goodRoles = ACTIVE.roles.filter(r => r.team === "Good");
+  const goodRoles = DATA.roles.filter(r => r.team === "Good");
   renderRoleTable(goodRoles, "good-roles-body", "#2563eb");
-  const evilRoles = ACTIVE.roles.filter(r => r.team === "Evil");
+  const evilRoles = DATA.roles.filter(r => r.team === "Evil");
   renderRoleTable(evilRoles, "evil-roles-body", "#dc2626");
 }}
 renderRoles();
@@ -1856,7 +1805,7 @@ renderRoles();
 
 // ── game records ─────────────────────────────────────────────────────────────
 function renderGameRecords() {{
-  const rec  = ACTIVE.game_records || {{}};
+  const rec  = DATA.game_records || {{}};
   const grid = document.getElementById('game-records-grid');
   if (!grid) return;
   grid.innerHTML = '';
@@ -1890,7 +1839,7 @@ renderGameRecords();
 
 // ── voice analysis table ──────────────────────────────────────────────────────
 function renderVoiceAnalysis() {{
-  const rows  = ACTIVE.voice_analysis || [];
+  const rows  = DATA.voice_analysis || [];
   const tbody = document.getElementById('voice-body');
   if (!tbody) return;
   tbody.innerHTML = '';
@@ -1918,7 +1867,7 @@ function renderVoiceAnalysis() {{
 }}
 renderVoiceAnalysis();
 
-// ── master re-render (called by toggleGoblin) ─────────────────────────────────
+// ── master re-render ─────────────────────────────────────────────────────────
 function renderAll() {{
   renderWins();
   renderStatBubbles();
@@ -1949,16 +1898,14 @@ function renderAll() {{
 
 
 def build(db: Path, out: Path, explorer_url: str) -> None:
-    """Read db, compute stats (with & without Goblin), write HTML."""
+    """Read db, compute stats, write HTML."""
     if not db.exists():
         print(f"[warn] {db} not found — writing empty-state page.")
         stats    = _empty_stats()
-        stats_ng = _empty_stats()
         games: list[dict] = []
     else:
         df       = _load(db)
         stats    = _compute_stats(df)
-        stats_ng = _compute_stats(df, exclude_goblin=True)
         games    = _load_recent_games(db)
 
     # ── shared auxiliary data (not goblin-sensitive) ───────────────────────────
@@ -2008,7 +1955,6 @@ def build(db: Path, out: Path, explorer_url: str) -> None:
         s["voice_analysis"] = voice_rows
 
     _augment(stats)
-    _augment(stats_ng)
 
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
@@ -2016,7 +1962,6 @@ def build(db: Path, out: Path, explorer_url: str) -> None:
         explorer_url  = explorer_url,
         generated_at  = generated_at,
         data_json     = json.dumps(stats,    ensure_ascii=False, indent=None),
-        data_ng_json  = json.dumps(stats_ng, ensure_ascii=False, indent=None),
         games_json    = json.dumps(games,    ensure_ascii=False, indent=None),
     )
     out.write_text(html, encoding="utf-8")
