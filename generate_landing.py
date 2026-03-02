@@ -194,28 +194,69 @@ def _compute_stats(df: pd.DataFrame) -> dict:
         for _, row in top_liars_df.iterrows()
     ]
 
-    # ── roles most often faked (claimed_role on LIE rows) ────────────────────
+    # ── roles most often faked (claimed_role, LIE + TRUE verdicts) ──────────
+    fake_src = df[
+        df["claimed_role"].notna() &
+        (df["claimed_role"].str.lower() != "unknown")
+    ]
     fake_df = (
-        df[
-            (df["verdict"] == "LIE") &
-            df["claimed_role"].notna() &
-            (df["claimed_role"].str.lower() != "unknown")
-        ]
-        .groupby("claimed_role")
+        fake_src.groupby("claimed_role")
         .agg(
-            times_faked  =("verdict",     "count"),
-            unique_liars =("player_name", "nunique"),
+            times_faked  =("verdict", lambda x: (x == "LIE").sum()),
+            times_honest =("verdict", lambda x: (x == "TRUE").sum()),
         )
         .reset_index()
     )
     fake_df["team"] = fake_df["claimed_role"].map(_team)
     fake_df = fake_df[fake_df["times_faked"] >= 2].sort_values("times_faked", ascending=False)
+    most_faked_role = (
+        {"role": str(fake_df.iloc[0]["claimed_role"]),
+         "team": str(fake_df.iloc[0]["team"]),
+         "times_faked": int(fake_df.iloc[0]["times_faked"])}
+        if not fake_df.empty else None
+    )
     fake_roles = fake_df.apply(lambda r: {
         "role":         r["claimed_role"],
         "team":         r["team"],
         "times_faked":  int(r["times_faked"]),
-        "unique_liars": int(r["unique_liars"]),
+        "times_honest": int(r["times_honest"]),
     }, axis=1).tolist()
+
+    # ── role win rates (best performing role per team) ────────────────────────
+    rw = df[
+        df["actual_role"].notna() &
+        (df["actual_role"].str.lower() != "unknown") &
+        df["winner"].notna()
+    ].drop_duplicates(subset=["actual_role", "video_id"])[
+        ["actual_role", "video_id", "winner", "team"]
+    ].copy()
+    rw["won"] = rw["winner"] == rw["team"]
+    rw_grp = (
+        rw.groupby("actual_role")
+        .agg(
+            total_games=("video_id", "nunique"),
+            wins       =("won",      "sum"),
+            team       =("team",     lambda x: x.mode().iloc[0] if not x.empty else "Good"),
+        )
+        .reset_index()
+    )
+    rw_grp = rw_grp[rw_grp["total_games"] >= 3].copy()
+    rw_grp["win_rate"] = rw_grp["wins"] / rw_grp["total_games"]
+
+    def _best_role(team_val):
+        sub = rw_grp[rw_grp["team"] == team_val].dropna(subset=["win_rate"])
+        if sub.empty:
+            return None
+        row = sub.sort_values("win_rate", ascending=False).iloc[0]
+        return {
+            "role":        str(row["actual_role"]),
+            "wins":        int(row["wins"]),
+            "total_games": int(row["total_games"]),
+            "win_rate":    round(float(row["win_rate"]), 3),
+        }
+
+    best_evil_role = _best_role("Evil")
+    best_good_role = _best_role("Good")
 
     # ── role breakdown (sorted by lie rate, min 3 claims) ─────────────────────
     role_df = (
@@ -283,12 +324,15 @@ def _compute_stats(df: pd.DataFrame) -> dict:
             "unverified": n_unver,
         },
         "superlatives": {
-            "most_evil":    _clean(most_evil),
-            "most_good":    _clean(most_good),
-            "biggest_liar": _clean(biggest_liar),
-            "most_honest":  _clean(most_honest),
-            "traitor":      _clean(traitor),
-            "most_games":   _clean(most_games),
+            "most_evil":       _clean(most_evil),
+            "most_good":       _clean(most_good),
+            "biggest_liar":    _clean(biggest_liar),
+            "most_honest":     _clean(most_honest),
+            "traitor":         _clean(traitor),
+            "most_games":      _clean(most_games),
+            "most_faked_role": most_faked_role,
+            "best_evil_role":  best_evil_role,
+            "best_good_role":  best_good_role,
         },
         "top_liars":   top_liars,
         "fake_roles":  fake_roles,
@@ -316,7 +360,8 @@ def _empty_stats() -> dict:
         "superlatives": {k: None for k in
                          ["most_evil", "most_good", "biggest_liar",
                           "most_honest", "traitor", "most_games",
-                          "most_talkative"]},
+                          "most_talkative", "most_faked_role",
+                          "best_evil_role", "best_good_role"]},
         "top_liars":  [],
         "fake_roles": [],
         "roles":      [],
@@ -768,7 +813,6 @@ footer a {{ color: var(--gold); }}
   </div>
 
   <div class="stat-row" id="stat-row"></div>
-  <a class="btn-explore" href="{explorer_url}" target="_blank">▶&nbsp; Open Full Explorer</a>
 </header>
 
 <main class="container">
@@ -807,7 +851,7 @@ footer a {{ color: var(--gold); }}
             <th>Claimed Role</th>
             <th>Team</th>
             <th>Times Faked</th>
-            <th>Unique Liars</th>
+            <th>Times Honest</th>
           </tr>
         </thead>
         <tbody id="fake-roles-body"></tbody>
@@ -836,6 +880,10 @@ footer a {{ color: var(--gold); }}
     <div class="section-title"><span>🎮</span> Recent Games</div>
     <div class="games-grid" id="games-grid"></div>
   </section>
+
+  <div style="text-align:center;padding:40px 0 24px">
+    <a class="btn-explore" href="{explorer_url}" target="_blank">▶&nbsp; Open Full Explorer</a>
+  </div>
 
 </main>
 
@@ -940,6 +988,24 @@ const EXPLORER = "{explorer_url}";
       name:   s => s.player_name,
       detail: s => `~${{Math.round(s.wpg).toLocaleString()}} words/game avg`,
       bg: "#1a2a1a",
+    }},
+    {{
+      key: "most_faked_role", icon: "🪪", label: "Favourite Cover Story",
+      name:   s => s.role,
+      detail: s => `Falsely claimed ${{s.times_faked}} times`,
+      bg: "#1a1430",
+    }},
+    {{
+      key: "best_evil_role", icon: "☠️", label: "Best Evil Role",
+      name:   s => s.role,
+      detail: s => `${{(s.win_rate*100).toFixed(0)}}% win rate (${{s.wins}}/${{s.total_games}} games)`,
+      bg: "#2a1215",
+    }},
+    {{
+      key: "best_good_role", icon: "🛡️", label: "Best Good Role",
+      name:   s => s.role,
+      detail: s => `${{(s.win_rate*100).toFixed(0)}}% win rate (${{s.wins}}/${{s.total_games}} games)`,
+      bg: "#0e2a1f",
     }},
   ];
 
@@ -1059,7 +1125,7 @@ const EXPLORER = "{explorer_url}";
         <td style="font-weight:600">${{r.role}}</td>
         <td><span class="team-${{r.team.toLowerCase()}}">${{r.team}}</span></td>
         <td>${{r.times_faked}}</td>
-        <td>${{r.unique_liars}}</td>
+        <td>${{r.times_honest}}</td>
       </tr>`;
   }});
 }})();
