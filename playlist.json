@@ -70,7 +70,7 @@
       "duration": 4290,
       "url": "https://www.youtube.com/watch?v=oN0pdPoVGhY",
       "status": "analyzed",
-      "winner": null,
+      "winner": "Evil",
       "members": false
     },
     {
@@ -169,7 +169,7 @@
       "duration": 4154,
       "url": "https://www.youtube.com/watch?v=X4OKDJ3XBuU",
       "status": "analyzed",
-      "winner": null,
+      "winner": "Good",
       "members": false
     },
     {
@@ -269,7 +269,7 @@
       "duration": 4853,
       "url": "https://www.youtube.com/watch?v=Y7_Tvnd3jDs",
       "status": "analyzed",
-      "winner": null,
+      "winner": "Good",
       "members": false
     },
     {
@@ -360,7 +360,7 @@
       "duration": 2917,
       "url": "https://www.youtube.com/watch?v=FVhHMIRhkmY",
       "status": "analyzed",
-      "winner": null,
+      "winner": "Good",
       "members": false
     },
     {
@@ -378,7 +378,7 @@
       "duration": 3876,
       "url": "https://www.youtube.com/watch?v=nZ4CPKMrCnY",
       "status": "analyzed",
-      "winner": null,
+      "winner": "Good",
       "members": false
     },
     {
@@ -414,7 +414,7 @@
       "duration": 2801,
       "url": "https://www.youtube.com/watch?v=MUoCe_9boaw",
       "status": "analyzed",
-      "winner": null,
+      "winner": "Evil",
       "members": false
     },
     {
@@ -433,7 +433,7 @@
       "url": "https://www.youtube.com/watch?v=OPqWyO7h-wM",
       "status": "analyzed",
       "members": false,
-      "winner": null
+      "winner": "Good"
     },
     {
       "id": "QbzFmlScLSA",
@@ -450,7 +450,7 @@
       "duration": 4048,
       "url": "https://www.youtube.com/watch?v=duo_5mvu_a4",
       "status": "analyzed",
-      "winner": null,
+      "winner": "Good",
       "members": false
     },
     {
