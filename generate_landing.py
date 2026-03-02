@@ -85,7 +85,8 @@ def _compute_stats(df: pd.DataFrame) -> dict:
     # ── per-player stats (mirror explore_public home tab logic) ───────────────
     named = df[
         df["player_name"].notna() &
-        ~df["player_name"].str.match(r"^speaker_\d+$", na=False)
+        ~df["player_name"].str.match(r"^speaker_\d+$", na=False) &
+        (df["player_name"] != "Storyteller")
     ].copy()
 
     game_teams = named.drop_duplicates(subset=["player_name", "video_id"])[

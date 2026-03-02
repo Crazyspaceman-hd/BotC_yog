@@ -435,10 +435,11 @@ with tab_home:
                 unsafe_allow_html=True,
             )
 
-        # Per-player aggregates — filter out unlinked speaker_X placeholders
+        # Per-player aggregates — filter out unlinked speaker_X placeholders and Storyteller
         _named = _all[
             _all["player_name"].notna() &
-            ~_all["player_name"].str.match(r"^speaker_\d+$", na=False)
+            ~_all["player_name"].str.match(r"^speaker_\d+$", na=False) &
+            (_all["player_name"] != "Storyteller")
         ]
 
         # Count evil/good games (one row per player×game, not per claim)

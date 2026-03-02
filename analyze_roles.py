@@ -609,6 +609,13 @@ def scan_for_lies(
             continue
 
         info = roster.get(speaker)
+        # Skip ANY speaker mapped as Storyteller (diarization may assign the
+        # Storyteller to non-speaker_0 IDs; auto_assign_speakers also does this)
+        if info and (info.get("is_storyteller")
+                     or info.get("actual_role") == "storyteller"
+                     or info.get("name", "").lower() == "storyteller"):
+            continue
+
         player_name = info["name"]   if info else speaker
         believed_at, actual_at = get_role_at(speaker, seg["start"], roster)
 
@@ -719,6 +726,7 @@ def main(video_id: str = "lF96Jd3Eaeg") -> None:
             if not raw_name or raw_name == spk:
                 continue
             name = resolve_player_name(raw_name, _PLAYER_ALIASES)
+            is_st = name.lower() == "storyteller"
             roster[spk] = {
                 "name":               name,
                 "believed_role":      (info.get("believed_role") or "unknown").lower(),
@@ -728,6 +736,7 @@ def main(video_id: str = "lF96Jd3Eaeg") -> None:
                                         info.get("believed_role") or "unknown").lower(),
                 "role_history":       [],
                 "source":             "manual",
+                "is_storyteller":     is_st,
             }
             n_applied += 1
         if n_applied:
