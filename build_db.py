@@ -170,9 +170,9 @@ def build(db_path: Path) -> None:
                         r.get("speaker", ""),
                         resolve_player_name(r.get("player_name", ""), _PLAYER_ALIASES),
                         team_for(r.get("actual_role", "")),
-                        r.get("actual_role", ""),
-                        r.get("believed_role", ""),
-                        r.get("claimed_role", ""),
+                        r.get("actual_role", "").title(),
+                        r.get("believed_role", "").title(),
+                        r.get("claimed_role", "").title(),
                         r.get("verdict", ""),
                         r.get("text", ""),
                     )
@@ -218,8 +218,8 @@ def build(db_path: Path) -> None:
                         (
                             vid,
                             resolve_player_name(p.get("name", ""), _PLAYER_ALIASES),
-                            p.get("actual_role", ""),
-                            p.get("believed_role", ""),
+                            p.get("actual_role", "").title(),
+                            p.get("believed_role", "").title(),
                             p.get("frame_time", 0.0),
                         )
                         for p in players
@@ -242,7 +242,7 @@ def build(db_path: Path) -> None:
             rows = [
                 (vid, spk,
                  resolve_player_name(ov.get("name", ""), _PLAYER_ALIASES),
-                 ov.get("actual_role", ""), ov.get("believed_role", ""))
+                 ov.get("actual_role", "").title(), ov.get("believed_role", "").title())
                 for spk, ov in overrides.items()
                 if ov.get("name")   # only store entries with a name assigned
             ]

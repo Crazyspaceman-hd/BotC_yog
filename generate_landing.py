@@ -41,6 +41,9 @@ def _load(db: Path) -> pd.DataFrame:
         con,
     )
     con.close()
+    # Normalise role strings to Title Case (handles legacy lowercase DB data)
+    for col in ("actual_role", "claimed_role"):
+        df[col] = df[col].fillna("").str.title()
     return df
 
 
@@ -179,10 +182,19 @@ def _load_game_records(db: Path) -> dict:
     }
 
 
-def _compute_stats(df: pd.DataFrame) -> dict:
+def _compute_stats(df: pd.DataFrame, exclude_goblin: bool = False) -> dict:
     """Compute all stats needed by the landing page."""
     if df.empty:
         return _empty_stats()
+
+    if exclude_goblin:
+        gob = (
+            (df["actual_role"].str.lower() == "goblin") |
+            (df["claimed_role"].str.lower() == "goblin")
+        )
+        df = df[~gob].copy()
+        if df.empty:
+            return _empty_stats()
 
     df["team"] = df["actual_role"].map(_team)
 
@@ -1050,40 +1062,7 @@ body.mc .info-close {{
   line-height: 28px;
 }}
 
-/* ── goblin mode toggle ──────────────────────────────────────────────────── */
-.goblin-toggle {{
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin-bottom: 16px;
-  padding: 10px 14px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}}
-.goblin-toggle label {{
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  cursor: pointer;
-  white-space: nowrap;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: var(--text);
-}}
-.goblin-toggle input[type=checkbox] {{
-  width: 14px;
-  height: 14px;
-  cursor: pointer;
-  accent-color: var(--gold);
-  flex-shrink: 0;
-}}
-.goblin-hint {{
-  color: var(--muted);
-  font-size: 0.75rem;
-  line-height: 1.6;
-  align-self: center;
-}}
+
 
 /* ── MINECRAFT THEME ─────────────────────────────────────────────────────── */
 body.mc {{
@@ -1247,10 +1226,6 @@ body.mc .record-card .record-title {{ font-family: 'Press Start 2P', monospace; 
 body.mc .record-card .record-stat {{ font-family: 'Press Start 2P', monospace; font-size: 0.5rem; }}
 body.mc .showmore-row td {{ background: #3c3c3c !important; }}
 body.mc .showmore-btn {{ font-family: 'Press Start 2P', monospace; font-size: 0.5rem; border-radius: 0; border-color: #5a5a5a; color: #ffaa00; }}
-body.mc .goblin-toggle {{ background: #3c3c3c; border: 2px solid #1a1a1a; border-radius: 0; box-shadow: inset 1px 1px 0 #5a5a5a, inset -1px -1px 0 #2a2a2a; }}
-body.mc .goblin-toggle label {{ font-family: 'Press Start 2P', monospace; font-size: 0.5rem; }}
-body.mc .goblin-hint {{ font-family: 'Press Start 2P', monospace; font-size: 0.42rem; line-height: 2.2; color: #aaaaaa; }}
-
 /* ── theme toggle button ──────────────────────────────────────────────────── */
 #theme-toggle {{
   position: fixed;
@@ -1292,11 +1267,52 @@ body.mc #theme-toggle:hover {{
 body.mc #theme-toggle:active {{
   box-shadow: inset 3px 3px 0 #2d2d2d, inset -3px -3px 0 #cfcfcf;
 }}
+#goblin-toggle {{
+  position: fixed;
+  top: 12px;
+  right: 120px;
+  z-index: 9999;
+  background: #1a2a1a;
+  border: 1px solid #2a452a;
+  color: #86efac;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 8px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background .15s, transform .1s;
+  letter-spacing: .02em;
+  line-height: 1;
+}}
+#goblin-toggle:hover {{ background: #243824; transform: translateY(-1px); }}
+#goblin-toggle.goblin-active {{
+  background: #1a4020;
+  border-color: #3a6a3a;
+  color: #4ade80;
+}}
+body.mc #goblin-toggle {{
+  background: #005500;
+  border: none;
+  box-shadow: inset -3px -3px 0 #002200, inset 3px 3px 0 #44aa44;
+  color: #88ff88;
+  font-family: 'Press Start 2P', monospace;
+  border-radius: 0;
+  font-size: 0.55rem;
+  padding: 10px 14px;
+  letter-spacing: 0.05em;
+  transition: background .1s;
+  transform: none;
+}}
+body.mc #goblin-toggle.goblin-active {{
+  background: #007700;
+  box-shadow: inset -3px -3px 0 #004400, inset 3px 3px 0 #66ff66;
+}}
 </style>
 </head>
 <body>
 
 <button id="theme-toggle" onclick="toggleTheme()">⛏ MC Mode</button>
+<button id="goblin-toggle" onclick="toggleGoblin()">🐊 Show Goblin</button>
 
 <header>
   <div class="hero-title">🏰 Blood on the Clocktower</div>
@@ -1316,10 +1332,6 @@ body.mc #theme-toggle:active {{
 
   <section>
     <div class="section-title"><span>🏆</span> Superlatives</div>
-    <div class="goblin-toggle">
-      <label><input type="checkbox" id="goblin-mode" onchange="toggleGoblinMode(this.checked)"> 🐊 Goblin mode</label>
-      <span class="goblin-hint">The Goblin's ability rewards loudly claiming their own role to bait an execution — this inflates Goblin stats across every table. Leave unchecked for cleaner data.</span>
-    </div>
     <div class="sup-grid" id="sup-grid"></div>
   </section>
 
@@ -1429,23 +1441,24 @@ body.mc #theme-toggle:active {{
 </footer>
 
 <script>
-const DATA   = {data_json};
-const GAMES  = {games_json};
+const DATA    = {data_json};
+const DATA_NG = {data_ng_json};
+const GAMES   = {games_json};
 const EXPLORER = "{explorer_url}";
+
+// Default: no-goblin dataset (cleaner stats)
+let ACTIVE = DATA_NG;
 
 // ── theme globals & helpers ───────────────────────────────────────────────────
 let _donutChart = null;
 let _barChart   = null;
-let _goblinMode          = false; // false = exclude Goblin (default)
-let _reRenderSuperlatives = null;
-let _reRenderFakeRoles    = null;
-let _reRenderEvilRoles    = null;
 
-function toggleGoblinMode(checked) {{
-  _goblinMode = checked;
-  if (_reRenderSuperlatives) _reRenderSuperlatives();
-  if (_reRenderFakeRoles)    _reRenderFakeRoles();
-  if (_reRenderEvilRoles)    _reRenderEvilRoles();
+function toggleGoblin() {{
+  ACTIVE = (ACTIVE === DATA_NG) ? DATA : DATA_NG;
+  const showing = (ACTIVE === DATA);
+  const btn = document.getElementById('goblin-toggle');
+  if (btn) btn.textContent = showing ? '🐊 Hide Goblin' : '🐊 Show Goblin';
+  renderAll();
 }}
 
 function updateChartTheme() {{
@@ -1489,8 +1502,8 @@ function toggleTheme() {{
 }}
 
 // ── wins scoreboard ────────────────────────────────────────────────────────────
-(function () {{
-  const w = DATA.wins || {{good: 0, evil: 0}};
+function renderWins() {{
+  const w = ACTIVE.wins || {{good: 0, evil: 0}};
   const board = document.getElementById("wins-board");
   if (board) {{
     board.innerHTML =
@@ -1513,11 +1526,12 @@ function toggleTheme() {{
   const be = document.getElementById("wbar-evil");
   if (bg) bg.style.width = goodPct + "%";
   if (be) be.style.width = evilPct + "%";
-}})();
+}}
+renderWins();
 
 // ── stat bubbles ──────────────────────────────────────────────────────────────
-(function () {{
-  const s = DATA.summary;
+function renderStatBubbles() {{
+  const s = ACTIVE.summary;
   const lie_rate = s.claims > 0 ? (s.lies / s.claims * 100).toFixed(1) + "%" : "—";
   const items = [
     [s.games,   "Games"],
@@ -1528,15 +1542,17 @@ function toggleTheme() {{
     [lie_rate,  "Lie Rate"],
   ];
   const row = document.getElementById("stat-row");
+  row.innerHTML = '';
   items.forEach(([num, lbl]) => {{
     row.innerHTML +=
       `<div class="stat-bubble"><div class="num">${{num}}</div><div class="lbl">${{lbl}}</div></div>`;
   }});
-}})();
+}}
+renderStatBubbles();
 
 // ── superlatives ──────────────────────────────────────────────────────────────
-(function () {{
-  const sup = DATA.superlatives;
+function renderSuperlatives() {{
+  const sup = ACTIVE.superlatives;
   const cards = [
     {{
       key: "most_evil", icon: "😈", label: "Most Often Evil",
@@ -1587,13 +1603,13 @@ function toggleTheme() {{
       bg: "#1a1430",
     }},
     {{
-      key: "best_evil_role", icon: "☠️", label: "Best Evil Role",
+      key: "best_evil_role", icon: "☠️", label: "Most Successful Evil Role",
       name:   s => s.role,
       detail: s => `${{(s.win_rate*100).toFixed(0)}}% win rate (${{s.wins}}/${{s.total_games}} games)`,
       bg: "#2a1215",
     }},
     {{
-      key: "best_good_role", icon: "🛡️", label: "Best Good Role",
+      key: "best_good_role", icon: "🛡️", label: "Most Successful Good Role",
       name:   s => s.role,
       detail: s => `${{(s.win_rate*100).toFixed(0)}}% win rate (${{s.wins}}/${{s.total_games}} games)`,
       bg: "#0e2a1f",
@@ -1601,35 +1617,34 @@ function toggleTheme() {{
   ];
 
   const grid = document.getElementById("sup-grid");
-  function render() {{
-    grid.innerHTML = '';
-    cards.forEach(c => {{
-      let data = sup[c.key];
-      // Suppress Goblin in role-based superlatives when goblin mode is off
-      if (!_goblinMode && data && data.role === 'goblin' &&
-          (c.key === 'most_faked_role' || c.key === 'best_evil_role')) {{
-        data = null;
-      }}
-      const html = data
-        ? `<div class="icon">${{c.icon}}</div>
-           <div class="label">${{c.label}}</div>
-           <div class="player">${{c.name(data)}}</div>
-           <div class="detail">${{c.detail(data)}}</div>`
-        : `<div class="icon">${{c.icon}}</div>
-           <div class="label">${{c.label}}</div>
-           <div class="player" style="color:var(--muted)">—</div>`;
-      grid.innerHTML +=
-        `<div class="sup-card" style="border-color:${{c.bg === "#2a1215" ? "#5a1f1f" :
-          c.bg === "#0e1f2a" ? "#1e3a5a" : "var(--border)"}};background:${{c.bg}}">${{html}}</div>`;
-    }});
-  }}
-  _reRenderSuperlatives = render;
-  render();
-}})();
+  grid.innerHTML = '';
+  cards.forEach(c => {{
+    const data = sup[c.key];
+    const html = data
+      ? `<div class="icon">${{c.icon}}</div>
+         <div class="label">${{c.label}}</div>
+         <div class="player">${{c.name(data)}}</div>
+         <div class="detail">${{c.detail(data)}}</div>`
+      : `<div class="icon">${{c.icon}}</div>
+         <div class="label">${{c.label}}</div>
+         <div class="player" style="color:var(--muted)">—</div>`;
+    grid.innerHTML +=
+      `<div class="sup-card" style="border-color:${{c.bg === "#2a1215" ? "#5a1f1f" :
+        c.bg === "#0e1f2a" ? "#1e3a5a" : "var(--border)"}};background:${{c.bg}}">${{html}}</div>`;
+  }});
+}}
+renderSuperlatives();
 
 // ── doughnut chart ────────────────────────────────────────────────────────────
-(function () {{
-  const s = DATA.summary;
+function renderDonut() {{
+  const s = ACTIVE.summary;
+  if (_donutChart) {{
+    _donutChart.data.datasets[0].data = [s.lies, s.true, s.unverified, s.hm];
+    _donutChart.options.plugins.tooltip.callbacks.label =
+      ctx => ` ${{ctx.label}}: ${{ctx.parsed}} (${{(ctx.parsed/(s.claims||1)*100).toFixed(1)}}%)`;
+    _donutChart.update();
+    return;
+  }}
   _donutChart = new Chart(document.getElementById("donut-chart"), {{
     type: "doughnut",
     data: {{
@@ -1661,22 +1676,30 @@ function toggleTheme() {{
       cutout: "68%",
     }},
   }});
-}})();
+}}
+renderDonut();
 
 // ── horizontal bar chart (top liars) ──────────────────────────────────────────
-(function () {{
-  const liars = DATA.top_liars;
+function renderBarChart() {{
+  const liars = ACTIVE.top_liars;
   if (!liars.length) return;
   const labels = liars.map(x => x.name);
   const lies   = liars.map(x => x.lies);
   const rates  = liars.map(x => x.lie_rate);
-  // Color each bar by lie_rate: low = amber, high = red
   const colors = rates.map(r => {{
     const t = Math.min(r, 1);
-    const red = Math.round(220 + t * (220 - 220));
     return `rgba(220, ${{Math.round(38 + (1-t)*140)}}, ${{Math.round(38 + (1-t)*100)}}, 0.85)`;
   }});
-
+  if (_barChart) {{
+    _barChart.data.labels = labels;
+    _barChart.data.datasets[0].data = lies;
+    _barChart.data.datasets[0].backgroundColor = colors;
+    // Rebuild tooltip closure with new rates
+    _barChart.options.plugins.tooltip.callbacks.label =
+      ctx => ` ${{ctx.parsed.x}} lies · ${{(rates[ctx.dataIndex]*100).toFixed(0)}}% lie rate`;
+    _barChart.update();
+    return;
+  }}
   _barChart = new Chart(document.getElementById("bar-chart"), {{
     type: "bar",
     data: {{
@@ -1710,16 +1733,17 @@ function toggleTheme() {{
       }},
     }},
   }});
-}})();
+}}
+renderBarChart();
 
 // ── most-faked roles table (collapsible) ──────────────────────────────────────
-(function () {{
+function renderFakeRoles() {{
   const LIMIT = 10;
   let expanded = false;
   const tbody = document.getElementById("fake-roles-body");
 
   function render() {{
-    const rows = (DATA.fake_roles || []).filter(r => _goblinMode || r.role !== 'goblin');
+    const rows = ACTIVE.fake_roles || [];
     if (!rows.length) {{
       tbody.innerHTML = `<tr><td colspan="4" class="empty">No lie data yet.</td></tr>`;
       return;
@@ -1744,13 +1768,13 @@ function toggleTheme() {{
       td.appendChild(btn); tr.appendChild(td); tbody.appendChild(tr);
     }}
   }}
-  _reRenderFakeRoles = render;
   render();
-}})();
+}}
+renderFakeRoles();
 
 // ── roles tables (split Evil / Good, collapsible) ─────────────────────────────
-(function () {{
-  function renderRoles(roles, tbodyId, barColor) {{
+function renderRoles() {{
+  function renderRoleTable(roles, tbodyId, barColor) {{
     const LIMIT = 10;
     let expanded = false;
     const tbody = document.getElementById(tbodyId);
@@ -1791,16 +1815,12 @@ function toggleTheme() {{
     render();
   }}
 
-  const goodRoles = DATA.roles.filter(r => r.team === "Good");
-  renderRoles(goodRoles, "good-roles-body", "#2563eb");
-
-  function renderEvil() {{
-    const evilRoles = DATA.roles.filter(r => r.team === "Evil" && (_goblinMode || r.role !== 'goblin'));
-    renderRoles(evilRoles, "evil-roles-body", "#dc2626");
-  }}
-  _reRenderEvilRoles = renderEvil;
-  renderEvil();
-}})();
+  const goodRoles = ACTIVE.roles.filter(r => r.team === "Good");
+  renderRoleTable(goodRoles, "good-roles-body", "#2563eb");
+  const evilRoles = ACTIVE.roles.filter(r => r.team === "Evil");
+  renderRoleTable(evilRoles, "evil-roles-body", "#dc2626");
+}}
+renderRoles();
 
 // ── games grid ────────────────────────────────────────────────────────────────
 (function () {{
@@ -1827,10 +1847,11 @@ function toggleTheme() {{
 }})();
 
 // ── game records ─────────────────────────────────────────────────────────────
-(function () {{
-  const rec  = DATA.game_records || {{}};
+function renderGameRecords() {{
+  const rec  = ACTIVE.game_records || {{}};
   const grid = document.getElementById('game-records-grid');
   if (!grid) return;
+  grid.innerHTML = '';
   const cards = [
     {{ key: 'most_lies',      icon: '🤥', label: 'Most Lies in One Game',
        stat: r => `${{r.lies}} lies · ${{(r.lie_rate*100).toFixed(0)}}% lie rate`, bg: '#2a1215' }},
@@ -1856,13 +1877,15 @@ function toggleTheme() {{
         </div>
       </div>`;
   }});
-}})();
+}}
+renderGameRecords();
 
 // ── voice analysis table ──────────────────────────────────────────────────────
-(function () {{
-  const rows  = DATA.voice_analysis || [];
+function renderVoiceAnalysis() {{
+  const rows  = ACTIVE.voice_analysis || [];
   const tbody = document.getElementById('voice-body');
   if (!tbody) return;
+  tbody.innerHTML = '';
   if (!rows.length) {{
     tbody.innerHTML = `<tr><td colspan="4" class="empty" style="padding:32px">Not enough data yet (need ≥4 games on each team).</td></tr>`;
     return;
@@ -1884,7 +1907,21 @@ function toggleTheme() {{
         </td>
       </tr>`;
   }});
-}})();
+}}
+renderVoiceAnalysis();
+
+// ── master re-render (called by toggleGoblin) ─────────────────────────────────
+function renderAll() {{
+  renderWins();
+  renderStatBubbles();
+  renderSuperlatives();
+  renderDonut();
+  renderBarChart();
+  renderFakeRoles();
+  renderRoles();
+  renderGameRecords();
+  renderVoiceAnalysis();
+}}
 
 // ── restore saved theme ───────────────────────────────────────────────────────
 (function () {{
@@ -1904,80 +1941,75 @@ function toggleTheme() {{
 
 
 def build(db: Path, out: Path, explorer_url: str) -> None:
-    """Read db, compute stats, write HTML."""
+    """Read db, compute stats (with & without Goblin), write HTML."""
     if not db.exists():
         print(f"[warn] {db} not found — writing empty-state page.")
-        stats = _empty_stats()
+        stats    = _empty_stats()
+        stats_ng = _empty_stats()
         games: list[dict] = []
     else:
-        df    = _load(db)
-        stats = _compute_stats(df)
-        games = _load_recent_games(db)
+        df       = _load(db)
+        stats    = _compute_stats(df)
+        stats_ng = _compute_stats(df, exclude_goblin=True)
+        games    = _load_recent_games(db)
 
-    # ── augment stats with wins + words-per-game ──────────────────────────────
+    # ── shared auxiliary data (not goblin-sensitive) ───────────────────────────
     if db.exists():
-        wins = _load_wins(db)
-        wpg  = _load_words_per_game(db)
-    else:
-        wins = {"good": 0, "evil": 0}
-        wpg  = {}
-
-    stats["wins"] = wins
-
-    # Attach per-player avg words/game
-    for p in stats.get("players", []):
-        p["wpg"] = round(wpg.get(p["name"], 0.0), 1)
-
-    # Most-talkative superlative (players with >5 games only)
-    eligible = [p for p in stats.get("players", []) if p["games"] > 5 and p["name"] in wpg]
-    if eligible:
-        top = max(eligible, key=lambda p: wpg.get(p["name"], 0))
-        stats["superlatives"]["most_talkative"] = {
-            "player_name": top["name"],
-            "wpg":         round(wpg[top["name"]], 0),
-            "games":       top["games"],
-        }
-    else:
-        stats["superlatives"]["most_talkative"] = None
-
-    # ── per-team words-per-game + game records ────────────────────────────────
-    if db.exists():
+        wins         = _load_wins(db)
+        wpg          = _load_words_per_game(db)
         wpg_team     = _load_words_per_team(db)
         game_records = _load_game_records(db)
     else:
+        wins         = {"good": 0, "evil": 0}
+        wpg          = {}
         wpg_team     = {}
         game_records = {"most_lies": None, "most_deceptive": None, "most_claims": None}
 
-    stats["game_records"] = game_records
+    def _augment(s: dict) -> None:
+        """Attach wins, WPG, voice-analysis and game records to a stats dict."""
+        s["wins"] = wins
+        for p in s.get("players", []):
+            p["wpg"] = round(wpg.get(p["name"], 0.0), 1)
+        eligible = [p for p in s.get("players", []) if p["games"] > 5 and p["name"] in wpg]
+        if eligible:
+            top = max(eligible, key=lambda p: wpg.get(p["name"], 0))
+            s["superlatives"]["most_talkative"] = {
+                "player_name": top["name"],
+                "wpg":         round(wpg[top["name"]], 0),
+                "games":       top["games"],
+            }
+        else:
+            s["superlatives"]["most_talkative"] = None
+        s["game_records"] = game_records
+        for p in s.get("players", []):
+            pt = wpg_team.get(p["name"], {})
+            p["good_wpg"] = round(pt.get("good", 0.0), 1)
+            p["evil_wpg"] = round(pt.get("evil", 0.0), 1)
+        voice_rows = []
+        for p in s.get("players", []):
+            gw, ew = p.get("good_wpg", 0.0), p.get("evil_wpg", 0.0)
+            if gw > 0 and ew > 0 and p["games"] >= 4:
+                voice_rows.append({
+                    "name":     p["name"],
+                    "good_wpg": gw,
+                    "evil_wpg": ew,
+                    "ratio":    round(ew / gw, 2),
+                    "games":    p["games"],
+                })
+        voice_rows.sort(key=lambda x: x["ratio"], reverse=True)
+        s["voice_analysis"] = voice_rows
 
-    # Attach good/evil WPG to each player
-    for p in stats.get("players", []):
-        pt = wpg_team.get(p["name"], {})
-        p["good_wpg"] = round(pt.get("good", 0.0), 1)
-        p["evil_wpg"] = round(pt.get("evil", 0.0), 1)
-
-    # Build voice-analysis rows (players with data on both teams, ≥4 games total)
-    voice_rows = []
-    for p in stats.get("players", []):
-        gw, ew = p.get("good_wpg", 0.0), p.get("evil_wpg", 0.0)
-        if gw > 0 and ew > 0 and p["games"] >= 4:
-            voice_rows.append({
-                "name":     p["name"],
-                "good_wpg": gw,
-                "evil_wpg": ew,
-                "ratio":    round(ew / gw, 2),
-                "games":    p["games"],
-            })
-    voice_rows.sort(key=lambda x: x["ratio"], reverse=True)
-    stats["voice_analysis"] = voice_rows
+    _augment(stats)
+    _augment(stats_ng)
 
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     html = _HTML.format(
         explorer_url  = explorer_url,
         generated_at  = generated_at,
-        data_json     = json.dumps(stats,  ensure_ascii=False, indent=None),
-        games_json    = json.dumps(games,  ensure_ascii=False, indent=None),
+        data_json     = json.dumps(stats,    ensure_ascii=False, indent=None),
+        data_ng_json  = json.dumps(stats_ng, ensure_ascii=False, indent=None),
+        games_json    = json.dumps(games,    ensure_ascii=False, indent=None),
     )
     out.write_text(html, encoding="utf-8")
     print(f"[OK] Wrote {out}  ({len(html):,} bytes)")
