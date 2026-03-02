@@ -483,6 +483,118 @@ footer a { color: var(--gold); }
 }
 .showmore-btn:hover { background: var(--surface2); }
 
+/* ── info button & modal ──────────────────────────────────────────────────── */
+.btn-info {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.75rem;
+  padding: 4px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+  margin-top: 10px;
+  display: inline-block;
+}
+.btn-info:hover { border-color: var(--gold); color: var(--gold); }
+
+#botc-info-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.72);
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  padding: 20px;
+}
+#botc-info-modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  max-width: 560px;
+  width: 100%;
+  padding: 28px 32px;
+  position: relative;
+  max-height: 82vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 40px rgba(0,0,0,.6);
+}
+#botc-info-modal h2 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-bottom: 16px;
+  background: linear-gradient(135deg, #fbbf24 0%, #f87171 60%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+#botc-info-modal p {
+  font-size: 0.88rem;
+  line-height: 1.75;
+  color: var(--text);
+  margin-bottom: 12px;
+}
+#botc-info-modal p:last-child { margin-bottom: 0; }
+#botc-info-modal strong { color: var(--gold); font-weight: 700; }
+.info-close {
+  position: absolute;
+  top: 14px; right: 14px;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 26px;
+  text-align: center;
+  transition: border-color .1s, color .1s;
+  padding: 0;
+}
+.info-close:hover { border-color: var(--evil); color: var(--evil); }
+
+body.mc .btn-info {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 0.5rem;
+  border-radius: 0;
+  border: 2px solid #5a5a5a;
+  padding: 8px 16px;
+}
+body.mc .btn-info:hover { border-color: #ffaa00; color: #ffaa00; }
+body.mc #botc-info-modal {
+  background: #3c3c3c;
+  border: 4px solid #1a1a1a;
+  border-radius: 0;
+  box-shadow: inset 2px 2px 0 #6a6a6a, inset -2px -2px 0 #2a2a2a, 6px 6px 0 #000;
+}
+body.mc #botc-info-modal h2 {
+  font-family: 'Press Start 2P', monospace;
+  background: transparent;
+  -webkit-background-clip: unset;
+  background-clip: unset;
+  -webkit-text-fill-color: #fcfc00;
+  color: #fcfc00;
+  text-shadow: 2px 2px 0 #5a4a00;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+}
+body.mc #botc-info-modal p {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 0.52rem;
+  line-height: 2.1;
+  color: #e0e0e0;
+}
+body.mc #botc-info-modal strong { color: #ffaa00; }
+body.mc .info-close {
+  font-family: 'Press Start 2P', monospace;
+  border-radius: 0;
+  border: 2px solid #5a5a5a;
+  box-shadow: inset -1px -1px 0 #2d2d2d, inset 1px 1px 0 #9a9a9a;
+  width: 32px; height: 32px;
+  line-height: 28px;
+}
+
 /* ── MINECRAFT THEME ─────────────────────────────────────────────────────── */
 body.mc {
   --bg:       #1a1a1a;
@@ -696,6 +808,7 @@ body.mc #theme-toggle:active {
 <header>
   <div class="hero-title">🏰 Blood on the Clocktower</div>
   <div class="hero-sub">Yogscast &middot; Automated lie detection across every game</div>
+  <button class="btn-info" onclick="document.getElementById('botc-info-overlay').style.display='flex'">❓ What is Blood on the Clocktower?</button>
 
   <div class="wins-board" id="wins-board"></div>
   <div class="wins-bar-wrap" id="wins-bar-wrap">
@@ -800,8 +913,21 @@ body.mc #theme-toggle:active {
 
 </main>
 
+<!-- BotC info modal -->
+<div id="botc-info-overlay" onclick="if(event.target===this)closeBotcInfo()">
+  <div id="botc-info-modal" role="dialog" aria-modal="true" aria-label="What is Blood on the Clocktower?">
+    <button class="info-close" onclick="closeBotcInfo()" aria-label="Close">✕</button>
+    <h2>🏰 Blood on the Clocktower</h2>
+    <p><strong>Blood on the Clocktower</strong> is a social deduction game for 5–20 players, played in person. Think Mafia or Werewolf, but with a dedicated Storyteller, full information during setup, and the ability to win even from the grave.</p>
+    <p>Players are split into two teams: <strong>Good</strong> (Townsfolk &amp; Outsiders) and <strong>Evil</strong> (Minions &amp; the Demon). Each player is dealt a secret role card with a unique ability. Good wins by executing the Demon; Evil wins if the Demon survives until only two players remain.</p>
+    <p>Every night the Demon and Minions wake silently to scheme, while Townsfolk may receive clues from the Storyteller. Every <strong>day</strong>, players openly debate, accuse, and vote to execute one suspect — then night falls again.</p>
+    <p><strong>Role-claiming</strong> is central to strategy. Good players share information; Evil players lie about who they are. This tracker automatically flags whenever a player's stated role doesn't match their actual role card — that's a lie!</p>
+    <p>The Yogscast play on their charity streams, usually with 10–15 players. The games you see here have all been automatically transcribed and analysed.</p>
+  </div>
+</div>
+
 <footer>
-  Generated 2026-03-02 05:48 UTC &middot;
+  Generated 2026-03-02 05:59 UTC &middot;
   <a href="http://localhost:8501" target="_blank">▶ Open full explorer</a>
 </footer>
 
@@ -833,6 +959,14 @@ function updateChartTheme() {
     _barChart.update();
   }
 }
+
+// ── BotC info modal ───────────────────────────────────────────────────────────
+function closeBotcInfo() {
+  document.getElementById('botc-info-overlay').style.display = 'none';
+}
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeBotcInfo();
+});
 
 function toggleTheme() {
   const isMC = document.body.classList.toggle('mc');
