@@ -595,40 +595,7 @@ body.mc .info-close {
   line-height: 28px;
 }
 
-/* ── goblin mode toggle ──────────────────────────────────────────────────── */
-.goblin-toggle {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin-bottom: 16px;
-  padding: 10px 14px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-.goblin-toggle label {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  cursor: pointer;
-  white-space: nowrap;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: var(--text);
-}
-.goblin-toggle input[type=checkbox] {
-  width: 14px;
-  height: 14px;
-  cursor: pointer;
-  accent-color: var(--gold);
-  flex-shrink: 0;
-}
-.goblin-hint {
-  color: var(--muted);
-  font-size: 0.75rem;
-  line-height: 1.6;
-  align-self: center;
-}
+
 
 /* ── MINECRAFT THEME ─────────────────────────────────────────────────────── */
 body.mc {
@@ -792,10 +759,6 @@ body.mc .record-card .record-title { font-family: 'Press Start 2P', monospace; f
 body.mc .record-card .record-stat { font-family: 'Press Start 2P', monospace; font-size: 0.5rem; }
 body.mc .showmore-row td { background: #3c3c3c !important; }
 body.mc .showmore-btn { font-family: 'Press Start 2P', monospace; font-size: 0.5rem; border-radius: 0; border-color: #5a5a5a; color: #ffaa00; }
-body.mc .goblin-toggle { background: #3c3c3c; border: 2px solid #1a1a1a; border-radius: 0; box-shadow: inset 1px 1px 0 #5a5a5a, inset -1px -1px 0 #2a2a2a; }
-body.mc .goblin-toggle label { font-family: 'Press Start 2P', monospace; font-size: 0.5rem; }
-body.mc .goblin-hint { font-family: 'Press Start 2P', monospace; font-size: 0.42rem; line-height: 2.2; color: #aaaaaa; }
-
 /* ── theme toggle button ──────────────────────────────────────────────────── */
 #theme-toggle {
   position: fixed;
@@ -837,11 +800,52 @@ body.mc #theme-toggle:hover {
 body.mc #theme-toggle:active {
   box-shadow: inset 3px 3px 0 #2d2d2d, inset -3px -3px 0 #cfcfcf;
 }
+#goblin-toggle {
+  position: fixed;
+  top: 12px;
+  right: 120px;
+  z-index: 9999;
+  background: #1a2a1a;
+  border: 1px solid #2a452a;
+  color: #86efac;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 8px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background .15s, transform .1s;
+  letter-spacing: .02em;
+  line-height: 1;
+}
+#goblin-toggle:hover { background: #243824; transform: translateY(-1px); }
+#goblin-toggle.goblin-active {
+  background: #1a4020;
+  border-color: #3a6a3a;
+  color: #4ade80;
+}
+body.mc #goblin-toggle {
+  background: #005500;
+  border: none;
+  box-shadow: inset -3px -3px 0 #002200, inset 3px 3px 0 #44aa44;
+  color: #88ff88;
+  font-family: 'Press Start 2P', monospace;
+  border-radius: 0;
+  font-size: 0.55rem;
+  padding: 10px 14px;
+  letter-spacing: 0.05em;
+  transition: background .1s;
+  transform: none;
+}
+body.mc #goblin-toggle.goblin-active {
+  background: #007700;
+  box-shadow: inset -3px -3px 0 #004400, inset 3px 3px 0 #66ff66;
+}
 </style>
 </head>
 <body>
 
 <button id="theme-toggle" onclick="toggleTheme()">⛏ MC Mode</button>
+<button id="goblin-toggle" onclick="toggleGoblin()">🐊 Show Goblin</button>
 
 <header>
   <div class="hero-title">🏰 Blood on the Clocktower</div>
@@ -861,10 +865,6 @@ body.mc #theme-toggle:active {
 
   <section>
     <div class="section-title"><span>🏆</span> Superlatives</div>
-    <div class="goblin-toggle">
-      <label><input type="checkbox" id="goblin-mode" onchange="toggleGoblinMode(this.checked)"> 🐊 Goblin mode</label>
-      <span class="goblin-hint">The Goblin's ability rewards loudly claiming their own role to bait an execution — this inflates Goblin stats across every table. Leave unchecked for cleaner data.</span>
-    </div>
     <div class="sup-grid" id="sup-grid"></div>
   </section>
 
@@ -969,28 +969,29 @@ body.mc #theme-toggle:active {
 </div>
 
 <footer>
-  Generated 2026-03-02 06:33 UTC &middot;
+  Generated 2026-03-02 06:59 UTC &middot;
   <a href="http://localhost:8501" target="_blank">▶ Open full explorer</a>
 </footer>
 
 <script>
-const DATA   = {"summary": {"games": 40, "players": 33, "claims": 768, "lies": 409, "true": 299, "hm": 37, "unverified": 23}, "superlatives": {"most_evil": {"player_name": "RTGame", "games": 6, "evil_g": 3, "good_g": 3, "claims": 25, "lies": 21, "true_": 4, "lie_rate": 0.84, "evil_rate": 0.5, "good_rate": 0.5}, "most_good": {"player_name": "Osie", "games": 15, "evil_g": 1, "good_g": 14, "claims": 29, "lies": 7, "true_": 22, "lie_rate": 0.241, "evil_rate": 0.067, "good_rate": 0.933}, "biggest_liar": {"player_name": "RTGame", "games": 6, "evil_g": 3, "good_g": 3, "claims": 25, "lies": 21, "true_": 4, "lie_rate": 0.84, "evil_rate": 0.5, "good_rate": 0.5}, "most_honest": {"player_name": "Osie", "games": 15, "evil_g": 1, "good_g": 14, "claims": 29, "lies": 7, "true_": 22, "lie_rate": 0.241, "evil_rate": 0.067, "good_rate": 0.933}, "traitor": {"player_name": "Nilesy", "good_lies": 52}, "most_games": {"player_name": "Kirsty", "games": 20, "evil_g": 2, "good_g": 18, "claims": 81, "lies": 39, "true_": 42, "lie_rate": 0.481, "evil_rate": 0.1, "good_rate": 0.9}, "most_faked_role": {"role": "goblin", "team": "Good", "times_faked": 47}, "best_evil_role": {"role": "marionette", "wins": 4, "total_games": 4, "win_rate": 1.0}, "best_good_role": {"role": "nightwatchman", "wins": 3, "total_games": 3, "win_rate": 1.0}, "most_talkative": {"player_name": "RTGame", "wpg": 2037.0, "games": 6}}, "top_liars": [{"name": "Nilesy", "lies": 60, "lie_rate": 0.541}, {"name": "Kirsty", "lies": 39, "lie_rate": 0.481}, {"name": "Duncan", "lies": 34, "lie_rate": 0.756}, {"name": "Zoey", "lies": 33, "lie_rate": 0.733}, {"name": "Rythian", "lies": 31, "lie_rate": 0.633}, {"name": "Ravs", "lies": 30, "lie_rate": 0.6}, {"name": "Ben", "lies": 27, "lie_rate": 0.5}, {"name": "Sophie", "lies": 24, "lie_rate": 0.727}, {"name": "RTGame", "lies": 21, "lie_rate": 0.84}, {"name": "Tom C", "lies": 15, "lie_rate": 0.536}], "fake_roles": [{"role": "goblin", "team": "Good", "times_faked": 47, "times_honest": 1}, {"role": "fortune teller", "team": "Good", "times_faked": 25, "times_honest": 22}, {"role": "dreamer", "team": "Good", "times_faked": 25, "times_honest": 24}, {"role": "empath", "team": "Good", "times_faked": 21, "times_honest": 17}, {"role": "farmer", "team": "Good", "times_faked": 18, "times_honest": 16}, {"role": "ogre", "team": "Good", "times_faked": 16, "times_honest": 8}, {"role": "seamstress", "team": "Good", "times_faked": 16, "times_honest": 4}, {"role": "undertaker", "team": "Good", "times_faked": 15, "times_honest": 6}, {"role": "mayor", "team": "Good", "times_faked": 13, "times_honest": 2}, {"role": "slayer", "team": "Good", "times_faked": 12, "times_honest": 1}, {"role": "drunk", "team": "Good", "times_faked": 11, "times_honest": 8}, {"role": "recluse", "team": "Good", "times_faked": 11, "times_honest": 2}, {"role": "gambler", "team": "Good", "times_faked": 11, "times_honest": 2}, {"role": "marionette", "team": "Evil", "times_faked": 10, "times_honest": 4}, {"role": "saint", "team": "Good", "times_faked": 9, "times_honest": 2}, {"role": "lunatic", "team": "Good", "times_faked": 8, "times_honest": 8}, {"role": "amnesiac", "team": "Good", "times_faked": 7, "times_honest": 8}, {"role": "balloonist", "team": "Good", "times_faked": 7, "times_honest": 2}, {"role": "damsel", "team": "Good", "times_faked": 7, "times_honest": 2}, {"role": "grandmother", "team": "Good", "times_faked": 7, "times_honest": 7}, {"role": "knight", "team": "Good", "times_faked": 7, "times_honest": 11}, {"role": "lord of typhon", "team": "Good", "times_faked": 6, "times_honest": 4}, {"role": "virgin", "team": "Good", "times_faked": 6, "times_honest": 1}, {"role": "butler", "team": "Good", "times_faked": 6, "times_honest": 0}, {"role": "zealot", "team": "Good", "times_faked": 6, "times_honest": 0}, {"role": "monk", "team": "Good", "times_faked": 6, "times_honest": 0}, {"role": "chef", "team": "Good", "times_faked": 5, "times_honest": 2}, {"role": "imp", "team": "Evil", "times_faked": 5, "times_honest": 2}, {"role": "high priestess", "team": "Good", "times_faked": 5, "times_honest": 1}, {"role": "cannibal", "team": "Good", "times_faked": 4, "times_honest": 21}, {"role": "pixie", "team": "Good", "times_faked": 4, "times_honest": 1}, {"role": "investigator", "team": "Good", "times_faked": 4, "times_honest": 5}, {"role": "acrobat", "team": "Good", "times_faked": 3, "times_honest": 7}, {"role": "washerwoman", "team": "Good", "times_faked": 3, "times_honest": 1}, {"role": "librarian", "team": "Good", "times_faked": 3, "times_honest": 2}, {"role": "noble", "team": "Good", "times_faked": 3, "times_honest": 15}, {"role": "po", "team": "Evil", "times_faked": 3, "times_honest": 0}, {"role": "snake charmer", "team": "Good", "times_faked": 3, "times_honest": 5}, {"role": "sweetheart", "team": "Good", "times_faked": 3, "times_honest": 6}, {"role": "oracle", "team": "Good", "times_faked": 2, "times_honest": 3}, {"role": "poppy grower", "team": "Good", "times_faked": 2, "times_honest": 0}, {"role": "soldier", "team": "Good", "times_faked": 2, "times_honest": 3}, {"role": "town crier", "team": "Good", "times_faked": 2, "times_honest": 8}, {"role": "widow", "team": "Good", "times_faked": 2, "times_honest": 2}], "roles": [{"role": "al-hadikhia", "team": "Evil", "claims": 10, "lies": 10, "lie_rate": 1.0}, {"role": "alchemist", "team": "Good", "claims": 7, "lies": 7, "lie_rate": 1.0}, {"role": "alsaahir", "team": "Good", "claims": 4, "lies": 4, "lie_rate": 1.0}, {"role": "cerenovus", "team": "Evil", "claims": 6, "lies": 6, "lie_rate": 1.0}, {"role": "fang gu", "team": "Evil", "claims": 3, "lies": 3, "lie_rate": 1.0}, {"role": "night watchman", "team": "Good", "claims": 3, "lies": 3, "lie_rate": 1.0}, {"role": "ojo", "team": "Evil", "claims": 5, "lies": 5, "lie_rate": 1.0}, {"role": "wizard", "team": "Good", "claims": 4, "lies": 4, "lie_rate": 1.0}, {"role": "pukka", "team": "Evil", "claims": 3, "lies": 3, "lie_rate": 1.0}, {"role": "politician", "team": "Good", "claims": 6, "lies": 6, "lie_rate": 1.0}, {"role": "nightwatchman", "team": "Good", "claims": 8, "lies": 8, "lie_rate": 1.0}, {"role": "poppy grower", "team": "Good", "claims": 3, "lies": 3, "lie_rate": 1.0}, {"role": "imp", "team": "Evil", "claims": 33, "lies": 31, "lie_rate": 0.939}, {"role": "virgin", "team": "Good", "claims": 15, "lies": 14, "lie_rate": 0.933}, {"role": "boffin", "team": "Good", "claims": 20, "lies": 18, "lie_rate": 0.9}, {"role": "goblin", "team": "Good", "claims": 10, "lies": 9, "lie_rate": 0.9}, {"role": "witch", "team": "Evil", "claims": 13, "lies": 11, "lie_rate": 0.846}, {"role": "seamstress", "team": "Good", "claims": 22, "lies": 18, "lie_rate": 0.818}, {"role": "legion", "team": "Evil", "claims": 10, "lies": 8, "lie_rate": 0.8}, {"role": "scarlet woman", "team": "Evil", "claims": 9, "lies": 7, "lie_rate": 0.778}, {"role": "oracle", "team": "Good", "claims": 13, "lies": 10, "lie_rate": 0.769}, {"role": "pixie", "team": "Good", "claims": 4, "lies": 3, "lie_rate": 0.75}, {"role": "huntsman", "team": "Good", "claims": 4, "lies": 3, "lie_rate": 0.75}, {"role": "lord of typhon", "team": "Good", "claims": 14, "lies": 10, "lie_rate": 0.714}, {"role": "librarian", "team": "Good", "claims": 6, "lies": 4, "lie_rate": 0.667}, {"role": "bounty hunter", "team": "Good", "claims": 3, "lies": 2, "lie_rate": 0.667}, {"role": "amnesiac", "team": "Good", "claims": 22, "lies": 14, "lie_rate": 0.636}, {"role": "harpy", "team": "Evil", "claims": 11, "lies": 7, "lie_rate": 0.636}, {"role": "poisoner", "team": "Evil", "claims": 13, "lies": 8, "lie_rate": 0.615}, {"role": "ravenkeeper", "team": "Good", "claims": 13, "lies": 8, "lie_rate": 0.615}, {"role": "lycanthrope", "team": "Good", "claims": 5, "lies": 3, "lie_rate": 0.6}, {"role": "investigator", "team": "Good", "claims": 12, "lies": 7, "lie_rate": 0.583}, {"role": "fisherman", "team": "Good", "claims": 14, "lies": 8, "lie_rate": 0.571}, {"role": "grandmother", "team": "Good", "claims": 16, "lies": 9, "lie_rate": 0.562}, {"role": "lunatic", "team": "Good", "claims": 20, "lies": 11, "lie_rate": 0.55}, {"role": "noble", "team": "Good", "claims": 30, "lies": 15, "lie_rate": 0.5}, {"role": "baron", "team": "Evil", "claims": 4, "lies": 2, "lie_rate": 0.5}, {"role": "widow", "team": "Good", "claims": 4, "lies": 2, "lie_rate": 0.5}, {"role": "marionette", "team": "Evil", "claims": 21, "lies": 10, "lie_rate": 0.476}, {"role": "town crier", "team": "Good", "claims": 14, "lies": 6, "lie_rate": 0.429}, {"role": "undertaker", "team": "Good", "claims": 10, "lies": 4, "lie_rate": 0.4}, {"role": "soldier", "team": "Good", "claims": 5, "lies": 2, "lie_rate": 0.4}, {"role": "empath", "team": "Good", "claims": 28, "lies": 11, "lie_rate": 0.393}, {"role": "farmer", "team": "Good", "claims": 26, "lies": 10, "lie_rate": 0.385}, {"role": "ogre", "team": "Good", "claims": 13, "lies": 5, "lie_rate": 0.385}, {"role": "artist", "team": "Good", "claims": 3, "lies": 1, "lie_rate": 0.333}, {"role": "chef", "team": "Good", "claims": 3, "lies": 1, "lie_rate": 0.333}, {"role": "gambler", "team": "Good", "claims": 3, "lies": 1, "lie_rate": 0.333}, {"role": "damsel", "team": "Good", "claims": 3, "lies": 1, "lie_rate": 0.333}, {"role": "savant", "team": "Good", "claims": 3, "lies": 1, "lie_rate": 0.333}, {"role": "recluse", "team": "Good", "claims": 3, "lies": 1, "lie_rate": 0.333}, {"role": "dreamer", "team": "Good", "claims": 36, "lies": 12, "lie_rate": 0.333}, {"role": "cannibal", "team": "Good", "claims": 29, "lies": 8, "lie_rate": 0.276}, {"role": "fortune teller", "team": "Good", "claims": 29, "lies": 7, "lie_rate": 0.241}, {"role": "drunk", "team": "Good", "claims": 42, "lies": 10, "lie_rate": 0.238}, {"role": "cult leader", "team": "Good", "claims": 9, "lies": 2, "lie_rate": 0.222}, {"role": "knight", "team": "Good", "claims": 14, "lies": 3, "lie_rate": 0.214}, {"role": "professor", "team": "Good", "claims": 7, "lies": 1, "lie_rate": 0.143}, {"role": "acrobat", "team": "Good", "claims": 8, "lies": 1, "lie_rate": 0.125}, {"role": "fool", "team": "Good", "claims": 3, "lies": 0, "lie_rate": 0.0}, {"role": "snake charmer", "team": "Good", "claims": 5, "lies": 0, "lie_rate": 0.0}, {"role": "sweetheart", "team": "Good", "claims": 6, "lies": 0, "lie_rate": 0.0}], "players": [{"name": "Nilesy", "games": 19, "claims": 111, "lies": 60, "true_": 47, "lie_rate": 0.541, "evil_rate": 0.105, "wpg": 1961.0, "good_wpg": 1856.5, "evil_wpg": 2996.5}, {"name": "Kirsty", "games": 20, "claims": 81, "lies": 39, "true_": 42, "lie_rate": 0.481, "evil_rate": 0.1, "wpg": 1171.5, "good_wpg": 1115.7, "evil_wpg": 1578.0}, {"name": "Duncan", "games": 15, "claims": 45, "lies": 34, "true_": 11, "lie_rate": 0.756, "evil_rate": 0.267, "wpg": 1225.9, "good_wpg": 1201.8, "evil_wpg": 1292.0}, {"name": "Zoey", "games": 8, "claims": 45, "lies": 33, "true_": 12, "lie_rate": 0.733, "evil_rate": 0.25, "wpg": 1558.6, "good_wpg": 1814.7, "evil_wpg": 1411.0}, {"name": "Rythian", "games": 17, "claims": 49, "lies": 31, "true_": 18, "lie_rate": 0.633, "evil_rate": 0.235, "wpg": 1755.0, "good_wpg": 1594.8, "evil_wpg": 1920.0}, {"name": "Ravs", "games": 11, "claims": 50, "lies": 30, "true_": 18, "lie_rate": 0.6, "evil_rate": 0.182, "wpg": 1192.1, "good_wpg": 1184.7, "evil_wpg": 1577.5}, {"name": "Ben", "games": 16, "claims": 54, "lies": 27, "true_": 23, "lie_rate": 0.5, "evil_rate": 0.25, "wpg": 1065.5, "good_wpg": 1028.7, "evil_wpg": 1244.0}, {"name": "Sophie", "games": 7, "claims": 33, "lies": 24, "true_": 4, "lie_rate": 0.727, "evil_rate": 0.286, "wpg": 1097.4, "good_wpg": 1256.4, "evil_wpg": 700.0}, {"name": "RTGame", "games": 6, "claims": 25, "lies": 21, "true_": 4, "lie_rate": 0.84, "evil_rate": 0.5, "wpg": 2037.2, "good_wpg": 2252.3, "evil_wpg": 1822.0}, {"name": "Tom C", "games": 7, "claims": 28, "lies": 15, "true_": 13, "lie_rate": 0.536, "evil_rate": 0.143, "wpg": 1480.3, "good_wpg": 1398.3, "evil_wpg": 1972.0}, {"name": "Zylus", "games": 10, "claims": 39, "lies": 13, "true_": 18, "lie_rate": 0.333, "evil_rate": 0.2, "wpg": 1487.6, "good_wpg": 1664.5, "evil_wpg": 1225.0}, {"name": "Briony", "games": 11, "claims": 30, "lies": 13, "true_": 13, "lie_rate": 0.433, "evil_rate": 0.273, "wpg": 1064.5, "good_wpg": 1058.8, "evil_wpg": 1079.7}, {"name": "Mark", "games": 8, "claims": 20, "lies": 12, "true_": 6, "lie_rate": 0.6, "evil_rate": 0.25, "wpg": 1757.8, "good_wpg": 2031.8, "evil_wpg": 1701.0}, {"name": "Osie", "games": 15, "claims": 29, "lies": 7, "true_": 22, "lie_rate": 0.241, "evil_rate": 0.067, "wpg": 686.9, "good_wpg": 697.2, "evil_wpg": 1110.0}, {"name": "Pyrion", "games": 4, "claims": 18, "lies": 7, "true_": 6, "lie_rate": 0.389, "evil_rate": 0.25, "wpg": 1242.8, "good_wpg": 1547.3, "evil_wpg": 539.0}, {"name": "Dom", "games": 2, "claims": 9, "lies": 6, "true_": 3, "lie_rate": 0.667, "evil_rate": 0.0, "wpg": 1507.0, "good_wpg": 1507.0, "evil_wpg": 0.0}, {"name": "CRAIG", "games": 1, "claims": 7, "lies": 6, "true_": 1, "lie_rate": 0.857, "evil_rate": 1.0, "wpg": 2223.0, "good_wpg": 0.0, "evil_wpg": 2223.0}, {"name": "Pedguin", "games": 4, "claims": 9, "lies": 5, "true_": 4, "lie_rate": 0.556, "evil_rate": 0.0, "wpg": 805.2, "good_wpg": 838.8, "evil_wpg": 0.0}, {"name": "Matt", "games": 1, "claims": 6, "lies": 5, "true_": 1, "lie_rate": 0.833, "evil_rate": 1.0, "wpg": 1849.0, "good_wpg": 0.0, "evil_wpg": 1849.0}, {"name": "Sullivan", "games": 2, "claims": 9, "lies": 4, "true_": 5, "lie_rate": 0.444, "evil_rate": 0.0, "wpg": 1636.5, "good_wpg": 1636.5, "evil_wpg": 0.0}, {"name": "Trott", "games": 2, "claims": 8, "lies": 3, "true_": 5, "lie_rate": 0.375, "evil_rate": 0.5, "wpg": 1012.0, "good_wpg": 1242.0, "evil_wpg": 1028.0}, {"name": "Boba", "games": 3, "claims": 3, "lies": 3, "true_": 0, "lie_rate": 1.0, "evil_rate": 0.333, "wpg": 1004.7, "good_wpg": 1385.0, "evil_wpg": 806.0}, {"name": "Daltos", "games": 2, "claims": 8, "lies": 3, "true_": 5, "lie_rate": 0.375, "evil_rate": 0.0, "wpg": 874.0, "good_wpg": 874.0, "evil_wpg": 0.0}, {"name": "Gee", "games": 3, "claims": 6, "lies": 3, "true_": 3, "lie_rate": 0.5, "evil_rate": 0.0, "wpg": 644.2, "good_wpg": 553.0, "evil_wpg": 0.0}, {"name": "Holly", "games": 2, "claims": 6, "lies": 2, "true_": 4, "lie_rate": 0.333, "evil_rate": 0.0, "wpg": 1903.0, "good_wpg": 1903.0, "evil_wpg": 0.0}, {"name": "ALEX", "games": 2, "claims": 3, "lies": 1, "true_": 2, "lie_rate": 0.333, "evil_rate": 0.5, "wpg": 1114.5, "good_wpg": 1362.0, "evil_wpg": 867.0}, {"name": "Lydia", "games": 2, "claims": 3, "lies": 1, "true_": 2, "lie_rate": 0.333, "evil_rate": 0.0, "wpg": 1052.0, "good_wpg": 1052.0, "evil_wpg": 0.0}, {"name": "BARRY", "games": 1, "claims": 3, "lies": 1, "true_": 2, "lie_rate": 0.333, "evil_rate": 0.0, "wpg": 1376.0, "good_wpg": 1603.0, "evil_wpg": 0.0}, {"name": "Breeh", "games": 1, "claims": 1, "lies": 0, "true_": 1, "lie_rate": 0.0, "evil_rate": 0.0, "wpg": 1233.0, "good_wpg": 1233.0, "evil_wpg": 0.0}, {"name": "Lewis Brindley", "games": 1, "claims": 1, "lies": 0, "true_": 0, "lie_rate": 0.0, "evil_rate": 0.0, "wpg": 2286.0, "good_wpg": 2286.0, "evil_wpg": 0.0}, {"name": "Ross", "games": 2, "claims": 4, "lies": 0, "true_": 4, "lie_rate": 0.0, "evil_rate": 0.0, "wpg": 1578.5, "good_wpg": 1578.5, "evil_wpg": 0.0}, {"name": "Smithy", "games": 1, "claims": 3, "lies": 0, "true_": 0, "lie_rate": 0.0, "evil_rate": 1.0, "wpg": 957.0, "good_wpg": 0.0, "evil_wpg": 957.0}, {"name": "UNKNOWN", "games": 1, "claims": 1, "lies": 0, "true_": 0, "lie_rate": 0.0, "evil_rate": 0.0, "wpg": 0.0, "good_wpg": 0.0, "evil_wpg": 0.0}], "wins": {"good": 19, "evil": 16}, "game_records": {"most_lies": {"id": "_EGJi3wg0bE", "title": "Who is the Goblin? - Blood on the Clocktower in Minecraft", "winner": "Good", "claims": 50, "lies": 43, "lie_rate": 0.86}, "most_deceptive": {"id": "O5tknyWOZ6Y", "title": "Vicious Vortox - Blood on the Clocktower in Minecraft", "winner": "Evil", "claims": 11, "lies": 10, "lie_rate": 0.909}, "most_claims": {"id": "_EGJi3wg0bE", "title": "Who is the Goblin? - Blood on the Clocktower in Minecraft", "winner": "Good", "claims": 50, "lies": 43, "lie_rate": 0.86}}, "voice_analysis": [{"name": "Nilesy", "good_wpg": 1856.5, "evil_wpg": 2996.5, "ratio": 1.61, "games": 19}, {"name": "Osie", "good_wpg": 697.2, "evil_wpg": 1110.0, "ratio": 1.59, "games": 15}, {"name": "Kirsty", "good_wpg": 1115.7, "evil_wpg": 1578.0, "ratio": 1.41, "games": 20}, {"name": "Tom C", "good_wpg": 1398.3, "evil_wpg": 1972.0, "ratio": 1.41, "games": 7}, {"name": "Ravs", "good_wpg": 1184.7, "evil_wpg": 1577.5, "ratio": 1.33, "games": 11}, {"name": "Ben", "good_wpg": 1028.7, "evil_wpg": 1244.0, "ratio": 1.21, "games": 16}, {"name": "Rythian", "good_wpg": 1594.8, "evil_wpg": 1920.0, "ratio": 1.2, "games": 17}, {"name": "Duncan", "good_wpg": 1201.8, "evil_wpg": 1292.0, "ratio": 1.08, "games": 15}, {"name": "Briony", "good_wpg": 1058.8, "evil_wpg": 1079.7, "ratio": 1.02, "games": 11}, {"name": "Mark", "good_wpg": 2031.8, "evil_wpg": 1701.0, "ratio": 0.84, "games": 8}, {"name": "RTGame", "good_wpg": 2252.3, "evil_wpg": 1822.0, "ratio": 0.81, "games": 6}, {"name": "Zoey", "good_wpg": 1814.7, "evil_wpg": 1411.0, "ratio": 0.78, "games": 8}, {"name": "Zylus", "good_wpg": 1664.5, "evil_wpg": 1225.0, "ratio": 0.74, "games": 10}, {"name": "Sophie", "good_wpg": 1256.4, "evil_wpg": 700.0, "ratio": 0.56, "games": 7}, {"name": "Pyrion", "good_wpg": 1547.3, "evil_wpg": 539.0, "ratio": 0.35, "games": 4}]};
-const GAMES  = [{"id": "duo_5mvu_a4", "title": "No nights in an Insomniac game - Blood on the Clocktower in Minecraft", "winner": "", "claims": 16, "lies": 7}, {"id": "QbzFmlScLSA", "title": "Yogs Staff play Blood on the Clocktower in Minecraft", "winner": "Evil", "claims": 20, "lies": 11}, {"id": "OPqWyO7h-wM", "title": "When Pitfalls go wrong! - Blood on the Clocktower in  Minecraft BONUS", "winner": "", "claims": 17, "lies": 3}, {"id": "MUoCe_9boaw", "title": "Who will the Klutz choose? - Blood on the Clocktower in Minecraft", "winner": "", "claims": 11, "lies": 1}, {"id": "6AOrG0z4Gog", "title": "Defending each other in a Big Wig - Blood on the Clocktower in Minecraft", "winner": "Good", "claims": 12, "lies": 10}, {"id": "coxvxJ862mY", "title": "Who can trust the Traveller? - Blood on the Clocktower in Minecraft", "winner": "Evil", "claims": 11, "lies": 6}, {"id": "DfPtc23EtGA", "title": "Two Minds, One Body - Blood on the Clocktower in Minecraft", "winner": "Good", "claims": 19, "lies": 8}, {"id": "nZ4CPKMrCnY", "title": "Rock, Paper, Scissors, Psychopath? We choose our own roles! | Blood on the Clocktower Bonus!", "winner": "", "claims": 21, "lies": 8}, {"id": "s_xs104YGo0", "title": "Trick or Treat? - Blood on the Clocktower in Minecraft | Halloween Special", "winner": "Good", "claims": 19, "lies": 4}, {"id": "FVhHMIRhkmY", "title": "Is this the worst Assassin? - Blood on the Clocktower in Minecraft", "winner": "", "claims": 6, "lies": 1}, {"id": "sByVy0JFi90", "title": "Back to basics with our noob players - Blood on the Clocktower in Minecraft", "winner": "Good", "claims": 18, "lies": 8}, {"id": "IUO3Xz1kNkc", "title": "4 evil vs 3 good when we choose our own roles | Blood on the Clocktower Bonus!", "winner": "Evil", "claims": 17, "lies": 5}];
+const DATA    = {"summary": {"games": 40, "players": 33, "claims": 768, "lies": 409, "true": 299, "hm": 37, "unverified": 23}, "superlatives": {"most_evil": {"player_name": "RTGame", "games": 6, "evil_g": 3, "good_g": 3, "claims": 25, "lies": 21, "true_": 4, "lie_rate": 0.84, "evil_rate": 0.5, "good_rate": 0.5}, "most_good": {"player_name": "Osie", "games": 15, "evil_g": 1, "good_g": 14, "claims": 29, "lies": 7, "true_": 22, "lie_rate": 0.241, "evil_rate": 0.067, "good_rate": 0.933}, "biggest_liar": {"player_name": "RTGame", "games": 6, "evil_g": 3, "good_g": 3, "claims": 25, "lies": 21, "true_": 4, "lie_rate": 0.84, "evil_rate": 0.5, "good_rate": 0.5}, "most_honest": {"player_name": "Osie", "games": 15, "evil_g": 1, "good_g": 14, "claims": 29, "lies": 7, "true_": 22, "lie_rate": 0.241, "evil_rate": 0.067, "good_rate": 0.933}, "traitor": {"player_name": "Nilesy", "good_lies": 52}, "most_games": {"player_name": "Kirsty", "games": 20, "evil_g": 2, "good_g": 18, "claims": 81, "lies": 39, "true_": 42, "lie_rate": 0.481, "evil_rate": 0.1, "good_rate": 0.9}, "most_faked_role": {"role": "Goblin", "team": "Good", "times_faked": 47}, "best_evil_role": {"role": "Marionette", "wins": 4, "total_games": 4, "win_rate": 1.0}, "best_good_role": {"role": "Nightwatchman", "wins": 3, "total_games": 3, "win_rate": 1.0}, "most_talkative": {"player_name": "RTGame", "wpg": 2037.0, "games": 6}}, "top_liars": [{"name": "Nilesy", "lies": 60, "lie_rate": 0.541}, {"name": "Kirsty", "lies": 39, "lie_rate": 0.481}, {"name": "Duncan", "lies": 34, "lie_rate": 0.756}, {"name": "Zoey", "lies": 33, "lie_rate": 0.733}, {"name": "Rythian", "lies": 31, "lie_rate": 0.633}, {"name": "Ravs", "lies": 30, "lie_rate": 0.6}, {"name": "Ben", "lies": 27, "lie_rate": 0.5}, {"name": "Sophie", "lies": 24, "lie_rate": 0.727}, {"name": "RTGame", "lies": 21, "lie_rate": 0.84}, {"name": "Tom C", "lies": 15, "lie_rate": 0.536}], "fake_roles": [{"role": "Goblin", "team": "Good", "times_faked": 47, "times_honest": 1}, {"role": "Fortune Teller", "team": "Good", "times_faked": 25, "times_honest": 22}, {"role": "Dreamer", "team": "Good", "times_faked": 25, "times_honest": 24}, {"role": "Empath", "team": "Good", "times_faked": 21, "times_honest": 17}, {"role": "Farmer", "team": "Good", "times_faked": 18, "times_honest": 16}, {"role": "Ogre", "team": "Good", "times_faked": 16, "times_honest": 8}, {"role": "Seamstress", "team": "Good", "times_faked": 16, "times_honest": 4}, {"role": "Undertaker", "team": "Good", "times_faked": 15, "times_honest": 6}, {"role": "Mayor", "team": "Good", "times_faked": 13, "times_honest": 2}, {"role": "Slayer", "team": "Good", "times_faked": 12, "times_honest": 1}, {"role": "Drunk", "team": "Good", "times_faked": 11, "times_honest": 8}, {"role": "Recluse", "team": "Good", "times_faked": 11, "times_honest": 2}, {"role": "Gambler", "team": "Good", "times_faked": 11, "times_honest": 2}, {"role": "Marionette", "team": "Evil", "times_faked": 10, "times_honest": 4}, {"role": "Saint", "team": "Good", "times_faked": 9, "times_honest": 2}, {"role": "Lunatic", "team": "Good", "times_faked": 8, "times_honest": 8}, {"role": "Amnesiac", "team": "Good", "times_faked": 7, "times_honest": 8}, {"role": "Balloonist", "team": "Good", "times_faked": 7, "times_honest": 2}, {"role": "Damsel", "team": "Good", "times_faked": 7, "times_honest": 2}, {"role": "Grandmother", "team": "Good", "times_faked": 7, "times_honest": 7}, {"role": "Knight", "team": "Good", "times_faked": 7, "times_honest": 11}, {"role": "Lord Of Typhon", "team": "Good", "times_faked": 6, "times_honest": 4}, {"role": "Virgin", "team": "Good", "times_faked": 6, "times_honest": 1}, {"role": "Butler", "team": "Good", "times_faked": 6, "times_honest": 0}, {"role": "Zealot", "team": "Good", "times_faked": 6, "times_honest": 0}, {"role": "Monk", "team": "Good", "times_faked": 6, "times_honest": 0}, {"role": "Chef", "team": "Good", "times_faked": 5, "times_honest": 2}, {"role": "Imp", "team": "Evil", "times_faked": 5, "times_honest": 2}, {"role": "High Priestess", "team": "Good", "times_faked": 5, "times_honest": 1}, {"role": "Cannibal", "team": "Good", "times_faked": 4, "times_honest": 21}, {"role": "Pixie", "team": "Good", "times_faked": 4, "times_honest": 1}, {"role": "Investigator", "team": "Good", "times_faked": 4, "times_honest": 5}, {"role": "Acrobat", "team": "Good", "times_faked": 3, "times_honest": 7}, {"role": "Washerwoman", "team": "Good", "times_faked": 3, "times_honest": 1}, {"role": "Librarian", "team": "Good", "times_faked": 3, "times_honest": 2}, {"role": "Noble", "team": "Good", "times_faked": 3, "times_honest": 15}, {"role": "Po", "team": "Evil", "times_faked": 3, "times_honest": 0}, {"role": "Snake Charmer", "team": "Good", "times_faked": 3, "times_honest": 5}, {"role": "Sweetheart", "team": "Good", "times_faked": 3, "times_honest": 6}, {"role": "Oracle", "team": "Good", "times_faked": 2, "times_honest": 3}, {"role": "Poppy Grower", "team": "Good", "times_faked": 2, "times_honest": 0}, {"role": "Soldier", "team": "Good", "times_faked": 2, "times_honest": 3}, {"role": "Town Crier", "team": "Good", "times_faked": 2, "times_honest": 8}, {"role": "Widow", "team": "Good", "times_faked": 2, "times_honest": 2}], "roles": [{"role": "Al-Hadikhia", "team": "Evil", "claims": 10, "lies": 10, "lie_rate": 1.0}, {"role": "Alchemist", "team": "Good", "claims": 7, "lies": 7, "lie_rate": 1.0}, {"role": "Alsaahir", "team": "Good", "claims": 4, "lies": 4, "lie_rate": 1.0}, {"role": "Cerenovus", "team": "Evil", "claims": 6, "lies": 6, "lie_rate": 1.0}, {"role": "Fang Gu", "team": "Evil", "claims": 3, "lies": 3, "lie_rate": 1.0}, {"role": "Night Watchman", "team": "Good", "claims": 3, "lies": 3, "lie_rate": 1.0}, {"role": "Ojo", "team": "Evil", "claims": 5, "lies": 5, "lie_rate": 1.0}, {"role": "Wizard", "team": "Good", "claims": 4, "lies": 4, "lie_rate": 1.0}, {"role": "Pukka", "team": "Evil", "claims": 3, "lies": 3, "lie_rate": 1.0}, {"role": "Politician", "team": "Good", "claims": 6, "lies": 6, "lie_rate": 1.0}, {"role": "Nightwatchman", "team": "Good", "claims": 8, "lies": 8, "lie_rate": 1.0}, {"role": "Poppy Grower", "team": "Good", "claims": 3, "lies": 3, "lie_rate": 1.0}, {"role": "Imp", "team": "Evil", "claims": 33, "lies": 31, "lie_rate": 0.939}, {"role": "Virgin", "team": "Good", "claims": 15, "lies": 14, "lie_rate": 0.933}, {"role": "Boffin", "team": "Good", "claims": 20, "lies": 18, "lie_rate": 0.9}, {"role": "Goblin", "team": "Good", "claims": 10, "lies": 9, "lie_rate": 0.9}, {"role": "Witch", "team": "Evil", "claims": 13, "lies": 11, "lie_rate": 0.846}, {"role": "Seamstress", "team": "Good", "claims": 22, "lies": 18, "lie_rate": 0.818}, {"role": "Legion", "team": "Evil", "claims": 10, "lies": 8, "lie_rate": 0.8}, {"role": "Scarlet Woman", "team": "Evil", "claims": 9, "lies": 7, "lie_rate": 0.778}, {"role": "Oracle", "team": "Good", "claims": 13, "lies": 10, "lie_rate": 0.769}, {"role": "Pixie", "team": "Good", "claims": 4, "lies": 3, "lie_rate": 0.75}, {"role": "Huntsman", "team": "Good", "claims": 4, "lies": 3, "lie_rate": 0.75}, {"role": "Lord Of Typhon", "team": "Good", "claims": 14, "lies": 10, "lie_rate": 0.714}, {"role": "Librarian", "team": "Good", "claims": 6, "lies": 4, "lie_rate": 0.667}, {"role": "Bounty Hunter", "team": "Good", "claims": 3, "lies": 2, "lie_rate": 0.667}, {"role": "Amnesiac", "team": "Good", "claims": 22, "lies": 14, "lie_rate": 0.636}, {"role": "Harpy", "team": "Evil", "claims": 11, "lies": 7, "lie_rate": 0.636}, {"role": "Poisoner", "team": "Evil", "claims": 13, "lies": 8, "lie_rate": 0.615}, {"role": "Ravenkeeper", "team": "Good", "claims": 13, "lies": 8, "lie_rate": 0.615}, {"role": "Lycanthrope", "team": "Good", "claims": 5, "lies": 3, "lie_rate": 0.6}, {"role": "Investigator", "team": "Good", "claims": 12, "lies": 7, "lie_rate": 0.583}, {"role": "Fisherman", "team": "Good", "claims": 14, "lies": 8, "lie_rate": 0.571}, {"role": "Grandmother", "team": "Good", "claims": 16, "lies": 9, "lie_rate": 0.562}, {"role": "Lunatic", "team": "Good", "claims": 20, "lies": 11, "lie_rate": 0.55}, {"role": "Noble", "team": "Good", "claims": 30, "lies": 15, "lie_rate": 0.5}, {"role": "Baron", "team": "Evil", "claims": 4, "lies": 2, "lie_rate": 0.5}, {"role": "Widow", "team": "Good", "claims": 4, "lies": 2, "lie_rate": 0.5}, {"role": "Marionette", "team": "Evil", "claims": 21, "lies": 10, "lie_rate": 0.476}, {"role": "Town Crier", "team": "Good", "claims": 14, "lies": 6, "lie_rate": 0.429}, {"role": "Undertaker", "team": "Good", "claims": 10, "lies": 4, "lie_rate": 0.4}, {"role": "Soldier", "team": "Good", "claims": 5, "lies": 2, "lie_rate": 0.4}, {"role": "Empath", "team": "Good", "claims": 28, "lies": 11, "lie_rate": 0.393}, {"role": "Farmer", "team": "Good", "claims": 26, "lies": 10, "lie_rate": 0.385}, {"role": "Ogre", "team": "Good", "claims": 13, "lies": 5, "lie_rate": 0.385}, {"role": "Artist", "team": "Good", "claims": 3, "lies": 1, "lie_rate": 0.333}, {"role": "Chef", "team": "Good", "claims": 3, "lies": 1, "lie_rate": 0.333}, {"role": "Gambler", "team": "Good", "claims": 3, "lies": 1, "lie_rate": 0.333}, {"role": "Damsel", "team": "Good", "claims": 3, "lies": 1, "lie_rate": 0.333}, {"role": "Savant", "team": "Good", "claims": 3, "lies": 1, "lie_rate": 0.333}, {"role": "Recluse", "team": "Good", "claims": 3, "lies": 1, "lie_rate": 0.333}, {"role": "Dreamer", "team": "Good", "claims": 36, "lies": 12, "lie_rate": 0.333}, {"role": "Cannibal", "team": "Good", "claims": 29, "lies": 8, "lie_rate": 0.276}, {"role": "Fortune Teller", "team": "Good", "claims": 29, "lies": 7, "lie_rate": 0.241}, {"role": "Drunk", "team": "Good", "claims": 42, "lies": 10, "lie_rate": 0.238}, {"role": "Cult Leader", "team": "Good", "claims": 9, "lies": 2, "lie_rate": 0.222}, {"role": "Knight", "team": "Good", "claims": 14, "lies": 3, "lie_rate": 0.214}, {"role": "Professor", "team": "Good", "claims": 7, "lies": 1, "lie_rate": 0.143}, {"role": "Acrobat", "team": "Good", "claims": 8, "lies": 1, "lie_rate": 0.125}, {"role": "Fool", "team": "Good", "claims": 3, "lies": 0, "lie_rate": 0.0}, {"role": "Snake Charmer", "team": "Good", "claims": 5, "lies": 0, "lie_rate": 0.0}, {"role": "Sweetheart", "team": "Good", "claims": 6, "lies": 0, "lie_rate": 0.0}], "players": [{"name": "Nilesy", "games": 19, "claims": 111, "lies": 60, "true_": 47, "lie_rate": 0.541, "evil_rate": 0.105, "wpg": 1961.0, "good_wpg": 1856.5, "evil_wpg": 2996.5}, {"name": "Kirsty", "games": 20, "claims": 81, "lies": 39, "true_": 42, "lie_rate": 0.481, "evil_rate": 0.1, "wpg": 1171.5, "good_wpg": 1115.7, "evil_wpg": 1578.0}, {"name": "Duncan", "games": 15, "claims": 45, "lies": 34, "true_": 11, "lie_rate": 0.756, "evil_rate": 0.267, "wpg": 1225.9, "good_wpg": 1201.8, "evil_wpg": 1292.0}, {"name": "Zoey", "games": 8, "claims": 45, "lies": 33, "true_": 12, "lie_rate": 0.733, "evil_rate": 0.25, "wpg": 1558.6, "good_wpg": 1814.7, "evil_wpg": 1411.0}, {"name": "Rythian", "games": 17, "claims": 49, "lies": 31, "true_": 18, "lie_rate": 0.633, "evil_rate": 0.235, "wpg": 1755.0, "good_wpg": 1594.8, "evil_wpg": 1920.0}, {"name": "Ravs", "games": 11, "claims": 50, "lies": 30, "true_": 18, "lie_rate": 0.6, "evil_rate": 0.182, "wpg": 1192.1, "good_wpg": 1184.7, "evil_wpg": 1577.5}, {"name": "Ben", "games": 16, "claims": 54, "lies": 27, "true_": 23, "lie_rate": 0.5, "evil_rate": 0.25, "wpg": 1065.5, "good_wpg": 1028.7, "evil_wpg": 1244.0}, {"name": "Sophie", "games": 7, "claims": 33, "lies": 24, "true_": 4, "lie_rate": 0.727, "evil_rate": 0.286, "wpg": 1097.4, "good_wpg": 1256.4, "evil_wpg": 700.0}, {"name": "RTGame", "games": 6, "claims": 25, "lies": 21, "true_": 4, "lie_rate": 0.84, "evil_rate": 0.5, "wpg": 2037.2, "good_wpg": 2252.3, "evil_wpg": 1822.0}, {"name": "Tom C", "games": 7, "claims": 28, "lies": 15, "true_": 13, "lie_rate": 0.536, "evil_rate": 0.143, "wpg": 1480.3, "good_wpg": 1398.3, "evil_wpg": 1972.0}, {"name": "Zylus", "games": 10, "claims": 39, "lies": 13, "true_": 18, "lie_rate": 0.333, "evil_rate": 0.2, "wpg": 1487.6, "good_wpg": 1664.5, "evil_wpg": 1225.0}, {"name": "Briony", "games": 11, "claims": 30, "lies": 13, "true_": 13, "lie_rate": 0.433, "evil_rate": 0.273, "wpg": 1064.5, "good_wpg": 1058.8, "evil_wpg": 1079.7}, {"name": "Mark", "games": 8, "claims": 20, "lies": 12, "true_": 6, "lie_rate": 0.6, "evil_rate": 0.25, "wpg": 1757.8, "good_wpg": 2031.8, "evil_wpg": 1701.0}, {"name": "Osie", "games": 15, "claims": 29, "lies": 7, "true_": 22, "lie_rate": 0.241, "evil_rate": 0.067, "wpg": 686.9, "good_wpg": 697.2, "evil_wpg": 1110.0}, {"name": "Pyrion", "games": 4, "claims": 18, "lies": 7, "true_": 6, "lie_rate": 0.389, "evil_rate": 0.25, "wpg": 1242.8, "good_wpg": 1547.3, "evil_wpg": 539.0}, {"name": "Dom", "games": 2, "claims": 9, "lies": 6, "true_": 3, "lie_rate": 0.667, "evil_rate": 0.0, "wpg": 1507.0, "good_wpg": 1507.0, "evil_wpg": 0.0}, {"name": "CRAIG", "games": 1, "claims": 7, "lies": 6, "true_": 1, "lie_rate": 0.857, "evil_rate": 1.0, "wpg": 2223.0, "good_wpg": 0.0, "evil_wpg": 2223.0}, {"name": "Pedguin", "games": 4, "claims": 9, "lies": 5, "true_": 4, "lie_rate": 0.556, "evil_rate": 0.0, "wpg": 805.2, "good_wpg": 838.8, "evil_wpg": 0.0}, {"name": "Matt", "games": 1, "claims": 6, "lies": 5, "true_": 1, "lie_rate": 0.833, "evil_rate": 1.0, "wpg": 1849.0, "good_wpg": 0.0, "evil_wpg": 1849.0}, {"name": "Sullivan", "games": 2, "claims": 9, "lies": 4, "true_": 5, "lie_rate": 0.444, "evil_rate": 0.0, "wpg": 1636.5, "good_wpg": 1636.5, "evil_wpg": 0.0}, {"name": "Trott", "games": 2, "claims": 8, "lies": 3, "true_": 5, "lie_rate": 0.375, "evil_rate": 0.5, "wpg": 1012.0, "good_wpg": 1242.0, "evil_wpg": 1028.0}, {"name": "Boba", "games": 3, "claims": 3, "lies": 3, "true_": 0, "lie_rate": 1.0, "evil_rate": 0.333, "wpg": 1004.7, "good_wpg": 1385.0, "evil_wpg": 806.0}, {"name": "Daltos", "games": 2, "claims": 8, "lies": 3, "true_": 5, "lie_rate": 0.375, "evil_rate": 0.0, "wpg": 874.0, "good_wpg": 874.0, "evil_wpg": 0.0}, {"name": "Gee", "games": 3, "claims": 6, "lies": 3, "true_": 3, "lie_rate": 0.5, "evil_rate": 0.0, "wpg": 644.2, "good_wpg": 553.0, "evil_wpg": 0.0}, {"name": "Holly", "games": 2, "claims": 6, "lies": 2, "true_": 4, "lie_rate": 0.333, "evil_rate": 0.0, "wpg": 1903.0, "good_wpg": 1903.0, "evil_wpg": 0.0}, {"name": "ALEX", "games": 2, "claims": 3, "lies": 1, "true_": 2, "lie_rate": 0.333, "evil_rate": 0.5, "wpg": 1114.5, "good_wpg": 1362.0, "evil_wpg": 867.0}, {"name": "Lydia", "games": 2, "claims": 3, "lies": 1, "true_": 2, "lie_rate": 0.333, "evil_rate": 0.0, "wpg": 1052.0, "good_wpg": 1052.0, "evil_wpg": 0.0}, {"name": "BARRY", "games": 1, "claims": 3, "lies": 1, "true_": 2, "lie_rate": 0.333, "evil_rate": 0.0, "wpg": 1376.0, "good_wpg": 1603.0, "evil_wpg": 0.0}, {"name": "Breeh", "games": 1, "claims": 1, "lies": 0, "true_": 1, "lie_rate": 0.0, "evil_rate": 0.0, "wpg": 1233.0, "good_wpg": 1233.0, "evil_wpg": 0.0}, {"name": "Lewis Brindley", "games": 1, "claims": 1, "lies": 0, "true_": 0, "lie_rate": 0.0, "evil_rate": 0.0, "wpg": 2286.0, "good_wpg": 2286.0, "evil_wpg": 0.0}, {"name": "Ross", "games": 2, "claims": 4, "lies": 0, "true_": 4, "lie_rate": 0.0, "evil_rate": 0.0, "wpg": 1578.5, "good_wpg": 1578.5, "evil_wpg": 0.0}, {"name": "Smithy", "games": 1, "claims": 3, "lies": 0, "true_": 0, "lie_rate": 0.0, "evil_rate": 1.0, "wpg": 957.0, "good_wpg": 0.0, "evil_wpg": 957.0}, {"name": "UNKNOWN", "games": 1, "claims": 1, "lies": 0, "true_": 0, "lie_rate": 0.0, "evil_rate": 0.0, "wpg": 0.0, "good_wpg": 0.0, "evil_wpg": 0.0}], "wins": {"good": 19, "evil": 16}, "game_records": {"most_lies": {"id": "_EGJi3wg0bE", "title": "Who is the Goblin? - Blood on the Clocktower in Minecraft", "winner": "Good", "claims": 50, "lies": 43, "lie_rate": 0.86}, "most_deceptive": {"id": "O5tknyWOZ6Y", "title": "Vicious Vortox - Blood on the Clocktower in Minecraft", "winner": "Evil", "claims": 11, "lies": 10, "lie_rate": 0.909}, "most_claims": {"id": "_EGJi3wg0bE", "title": "Who is the Goblin? - Blood on the Clocktower in Minecraft", "winner": "Good", "claims": 50, "lies": 43, "lie_rate": 0.86}}, "voice_analysis": [{"name": "Nilesy", "good_wpg": 1856.5, "evil_wpg": 2996.5, "ratio": 1.61, "games": 19}, {"name": "Osie", "good_wpg": 697.2, "evil_wpg": 1110.0, "ratio": 1.59, "games": 15}, {"name": "Kirsty", "good_wpg": 1115.7, "evil_wpg": 1578.0, "ratio": 1.41, "games": 20}, {"name": "Tom C", "good_wpg": 1398.3, "evil_wpg": 1972.0, "ratio": 1.41, "games": 7}, {"name": "Ravs", "good_wpg": 1184.7, "evil_wpg": 1577.5, "ratio": 1.33, "games": 11}, {"name": "Ben", "good_wpg": 1028.7, "evil_wpg": 1244.0, "ratio": 1.21, "games": 16}, {"name": "Rythian", "good_wpg": 1594.8, "evil_wpg": 1920.0, "ratio": 1.2, "games": 17}, {"name": "Duncan", "good_wpg": 1201.8, "evil_wpg": 1292.0, "ratio": 1.08, "games": 15}, {"name": "Briony", "good_wpg": 1058.8, "evil_wpg": 1079.7, "ratio": 1.02, "games": 11}, {"name": "Mark", "good_wpg": 2031.8, "evil_wpg": 1701.0, "ratio": 0.84, "games": 8}, {"name": "RTGame", "good_wpg": 2252.3, "evil_wpg": 1822.0, "ratio": 0.81, "games": 6}, {"name": "Zoey", "good_wpg": 1814.7, "evil_wpg": 1411.0, "ratio": 0.78, "games": 8}, {"name": "Zylus", "good_wpg": 1664.5, "evil_wpg": 1225.0, "ratio": 0.74, "games": 10}, {"name": "Sophie", "good_wpg": 1256.4, "evil_wpg": 700.0, "ratio": 0.56, "games": 7}, {"name": "Pyrion", "good_wpg": 1547.3, "evil_wpg": 539.0, "ratio": 0.35, "games": 4}]};
+const DATA_NG = {"summary": {"games": 40, "players": 32, "claims": 709, "lies": 353, "true": 298, "hm": 37, "unverified": 21}, "superlatives": {"most_evil": {"player_name": "RTGame", "games": 6, "evil_g": 3, "good_g": 3, "claims": 22, "lies": 18, "true_": 4, "lie_rate": 0.818, "evil_rate": 0.5, "good_rate": 0.5}, "most_good": {"player_name": "Osie", "games": 15, "evil_g": 1, "good_g": 14, "claims": 29, "lies": 7, "true_": 22, "lie_rate": 0.241, "evil_rate": 0.067, "good_rate": 0.933}, "biggest_liar": {"player_name": "RTGame", "games": 6, "evil_g": 3, "good_g": 3, "claims": 22, "lies": 18, "true_": 4, "lie_rate": 0.818, "evil_rate": 0.5, "good_rate": 0.5}, "most_honest": {"player_name": "Osie", "games": 15, "evil_g": 1, "good_g": 14, "claims": 29, "lies": 7, "true_": 22, "lie_rate": 0.241, "evil_rate": 0.067, "good_rate": 0.933}, "traitor": {"player_name": "Nilesy", "good_lies": 32}, "most_games": {"player_name": "Kirsty", "games": 19, "evil_g": 2, "good_g": 17, "claims": 76, "lies": 34, "true_": 42, "lie_rate": 0.447, "evil_rate": 0.105, "good_rate": 0.895}, "most_faked_role": {"role": "Dreamer", "team": "Good", "times_faked": 25}, "best_evil_role": {"role": "Marionette", "wins": 4, "total_games": 4, "win_rate": 1.0}, "best_good_role": {"role": "Lunatic", "wins": 4, "total_games": 5, "win_rate": 0.8}, "most_talkative": {"player_name": "RTGame", "wpg": 2037.0, "games": 6}}, "top_liars": [{"name": "Nilesy", "lies": 40, "lie_rate": 0.44}, {"name": "Duncan", "lies": 34, "lie_rate": 0.756}, {"name": "Kirsty", "lies": 34, "lie_rate": 0.447}, {"name": "Rythian", "lies": 31, "lie_rate": 0.633}, {"name": "Ravs", "lies": 24, "lie_rate": 0.545}, {"name": "Ben", "lies": 24, "lie_rate": 0.471}, {"name": "Zoey", "lies": 24, "lie_rate": 0.686}, {"name": "Sophie", "lies": 24, "lie_rate": 0.727}, {"name": "RTGame", "lies": 18, "lie_rate": 0.818}, {"name": "Briony", "lies": 13, "lie_rate": 0.433}], "fake_roles": [{"role": "Dreamer", "team": "Good", "times_faked": 25, "times_honest": 24}, {"role": "Fortune Teller", "team": "Good", "times_faked": 25, "times_honest": 22}, {"role": "Empath", "team": "Good", "times_faked": 21, "times_honest": 17}, {"role": "Farmer", "team": "Good", "times_faked": 18, "times_honest": 16}, {"role": "Ogre", "team": "Good", "times_faked": 16, "times_honest": 8}, {"role": "Seamstress", "team": "Good", "times_faked": 16, "times_honest": 4}, {"role": "Undertaker", "team": "Good", "times_faked": 15, "times_honest": 6}, {"role": "Mayor", "team": "Good", "times_faked": 13, "times_honest": 2}, {"role": "Slayer", "team": "Good", "times_faked": 12, "times_honest": 1}, {"role": "Drunk", "team": "Good", "times_faked": 11, "times_honest": 8}, {"role": "Recluse", "team": "Good", "times_faked": 11, "times_honest": 2}, {"role": "Marionette", "team": "Evil", "times_faked": 10, "times_honest": 4}, {"role": "Saint", "team": "Good", "times_faked": 9, "times_honest": 2}, {"role": "Lunatic", "team": "Good", "times_faked": 8, "times_honest": 8}, {"role": "Knight", "team": "Good", "times_faked": 7, "times_honest": 11}, {"role": "Balloonist", "team": "Good", "times_faked": 7, "times_honest": 2}, {"role": "Amnesiac", "team": "Good", "times_faked": 7, "times_honest": 8}, {"role": "Damsel", "team": "Good", "times_faked": 7, "times_honest": 2}, {"role": "Grandmother", "team": "Good", "times_faked": 7, "times_honest": 7}, {"role": "Virgin", "team": "Good", "times_faked": 6, "times_honest": 1}, {"role": "Zealot", "team": "Good", "times_faked": 6, "times_honest": 0}, {"role": "Monk", "team": "Good", "times_faked": 6, "times_honest": 0}, {"role": "Butler", "team": "Good", "times_faked": 6, "times_honest": 0}, {"role": "High Priestess", "team": "Good", "times_faked": 5, "times_honest": 1}, {"role": "Imp", "team": "Evil", "times_faked": 5, "times_honest": 2}, {"role": "Chef", "team": "Good", "times_faked": 5, "times_honest": 2}, {"role": "Gambler", "team": "Good", "times_faked": 5, "times_honest": 2}, {"role": "Pixie", "team": "Good", "times_faked": 4, "times_honest": 1}, {"role": "Cannibal", "team": "Good", "times_faked": 4, "times_honest": 21}, {"role": "Investigator", "team": "Good", "times_faked": 4, "times_honest": 5}, {"role": "Lord Of Typhon", "team": "Good", "times_faked": 4, "times_honest": 4}, {"role": "Acrobat", "team": "Good", "times_faked": 3, "times_honest": 7}, {"role": "Washerwoman", "team": "Good", "times_faked": 3, "times_honest": 1}, {"role": "Librarian", "team": "Good", "times_faked": 3, "times_honest": 2}, {"role": "Noble", "team": "Good", "times_faked": 3, "times_honest": 15}, {"role": "Po", "team": "Evil", "times_faked": 3, "times_honest": 0}, {"role": "Snake Charmer", "team": "Good", "times_faked": 3, "times_honest": 5}, {"role": "Sweetheart", "team": "Good", "times_faked": 3, "times_honest": 6}, {"role": "Oracle", "team": "Good", "times_faked": 2, "times_honest": 3}, {"role": "Poppy Grower", "team": "Good", "times_faked": 2, "times_honest": 0}, {"role": "Soldier", "team": "Good", "times_faked": 2, "times_honest": 3}, {"role": "Town Crier", "team": "Good", "times_faked": 2, "times_honest": 8}, {"role": "Widow", "team": "Good", "times_faked": 2, "times_honest": 2}], "roles": [{"role": "Al-Hadikhia", "team": "Evil", "claims": 10, "lies": 10, "lie_rate": 1.0}, {"role": "Alsaahir", "team": "Good", "claims": 4, "lies": 4, "lie_rate": 1.0}, {"role": "Cerenovus", "team": "Evil", "claims": 6, "lies": 6, "lie_rate": 1.0}, {"role": "Fang Gu", "team": "Evil", "claims": 3, "lies": 3, "lie_rate": 1.0}, {"role": "Wizard", "team": "Good", "claims": 4, "lies": 4, "lie_rate": 1.0}, {"role": "Pukka", "team": "Evil", "claims": 3, "lies": 3, "lie_rate": 1.0}, {"role": "Politician", "team": "Good", "claims": 6, "lies": 6, "lie_rate": 1.0}, {"role": "Ojo", "team": "Evil", "claims": 5, "lies": 5, "lie_rate": 1.0}, {"role": "Poppy Grower", "team": "Good", "claims": 3, "lies": 3, "lie_rate": 1.0}, {"role": "Nightwatchman", "team": "Good", "claims": 3, "lies": 3, "lie_rate": 1.0}, {"role": "Night Watchman", "team": "Good", "claims": 3, "lies": 3, "lie_rate": 1.0}, {"role": "Imp", "team": "Evil", "claims": 33, "lies": 31, "lie_rate": 0.939}, {"role": "Virgin", "team": "Good", "claims": 15, "lies": 14, "lie_rate": 0.933}, {"role": "Witch", "team": "Evil", "claims": 13, "lies": 11, "lie_rate": 0.846}, {"role": "Seamstress", "team": "Good", "claims": 22, "lies": 18, "lie_rate": 0.818}, {"role": "Legion", "team": "Evil", "claims": 10, "lies": 8, "lie_rate": 0.8}, {"role": "Scarlet Woman", "team": "Evil", "claims": 9, "lies": 7, "lie_rate": 0.778}, {"role": "Oracle", "team": "Good", "claims": 13, "lies": 10, "lie_rate": 0.769}, {"role": "Pixie", "team": "Good", "claims": 4, "lies": 3, "lie_rate": 0.75}, {"role": "Huntsman", "team": "Good", "claims": 4, "lies": 3, "lie_rate": 0.75}, {"role": "Lord Of Typhon", "team": "Good", "claims": 14, "lies": 10, "lie_rate": 0.714}, {"role": "Librarian", "team": "Good", "claims": 6, "lies": 4, "lie_rate": 0.667}, {"role": "Bounty Hunter", "team": "Good", "claims": 3, "lies": 2, "lie_rate": 0.667}, {"role": "Harpy", "team": "Evil", "claims": 11, "lies": 7, "lie_rate": 0.636}, {"role": "Ravenkeeper", "team": "Good", "claims": 13, "lies": 8, "lie_rate": 0.615}, {"role": "Poisoner", "team": "Evil", "claims": 13, "lies": 8, "lie_rate": 0.615}, {"role": "Lycanthrope", "team": "Good", "claims": 5, "lies": 3, "lie_rate": 0.6}, {"role": "Investigator", "team": "Good", "claims": 12, "lies": 7, "lie_rate": 0.583}, {"role": "Amnesiac", "team": "Good", "claims": 19, "lies": 11, "lie_rate": 0.579}, {"role": "Lunatic", "team": "Good", "claims": 20, "lies": 11, "lie_rate": 0.55}, {"role": "Baron", "team": "Evil", "claims": 4, "lies": 2, "lie_rate": 0.5}, {"role": "Widow", "team": "Good", "claims": 4, "lies": 2, "lie_rate": 0.5}, {"role": "Noble", "team": "Good", "claims": 29, "lies": 14, "lie_rate": 0.483}, {"role": "Marionette", "team": "Evil", "claims": 21, "lies": 10, "lie_rate": 0.476}, {"role": "Fisherman", "team": "Good", "claims": 11, "lies": 5, "lie_rate": 0.455}, {"role": "Town Crier", "team": "Good", "claims": 14, "lies": 6, "lie_rate": 0.429}, {"role": "Undertaker", "team": "Good", "claims": 10, "lies": 4, "lie_rate": 0.4}, {"role": "Soldier", "team": "Good", "claims": 5, "lies": 2, "lie_rate": 0.4}, {"role": "Empath", "team": "Good", "claims": 28, "lies": 11, "lie_rate": 0.393}, {"role": "Ogre", "team": "Good", "claims": 13, "lies": 5, "lie_rate": 0.385}, {"role": "Gambler", "team": "Good", "claims": 3, "lies": 1, "lie_rate": 0.333}, {"role": "Chef", "team": "Good", "claims": 3, "lies": 1, "lie_rate": 0.333}, {"role": "Artist", "team": "Good", "claims": 3, "lies": 1, "lie_rate": 0.333}, {"role": "Damsel", "team": "Good", "claims": 3, "lies": 1, "lie_rate": 0.333}, {"role": "Dreamer", "team": "Good", "claims": 36, "lies": 12, "lie_rate": 0.333}, {"role": "Farmer", "team": "Good", "claims": 24, "lies": 8, "lie_rate": 0.333}, {"role": "Savant", "team": "Good", "claims": 3, "lies": 1, "lie_rate": 0.333}, {"role": "Recluse", "team": "Good", "claims": 3, "lies": 1, "lie_rate": 0.333}, {"role": "Grandmother", "team": "Good", "claims": 10, "lies": 3, "lie_rate": 0.3}, {"role": "Cannibal", "team": "Good", "claims": 28, "lies": 7, "lie_rate": 0.25}, {"role": "Fortune Teller", "team": "Good", "claims": 29, "lies": 7, "lie_rate": 0.241}, {"role": "Cult Leader", "team": "Good", "claims": 9, "lies": 2, "lie_rate": 0.222}, {"role": "Drunk", "team": "Good", "claims": 41, "lies": 9, "lie_rate": 0.22}, {"role": "Knight", "team": "Good", "claims": 14, "lies": 3, "lie_rate": 0.214}, {"role": "Professor", "team": "Good", "claims": 7, "lies": 1, "lie_rate": 0.143}, {"role": "Acrobat", "team": "Good", "claims": 8, "lies": 1, "lie_rate": 0.125}, {"role": "Fool", "team": "Good", "claims": 3, "lies": 0, "lie_rate": 0.0}, {"role": "Snake Charmer", "team": "Good", "claims": 5, "lies": 0, "lie_rate": 0.0}, {"role": "Sweetheart", "team": "Good", "claims": 6, "lies": 0, "lie_rate": 0.0}], "players": [{"name": "Nilesy", "games": 19, "claims": 91, "lies": 40, "true_": 47, "lie_rate": 0.44, "evil_rate": 0.105, "wpg": 1961.0, "good_wpg": 1856.5, "evil_wpg": 2996.5}, {"name": "Kirsty", "games": 19, "claims": 76, "lies": 34, "true_": 42, "lie_rate": 0.447, "evil_rate": 0.105, "wpg": 1171.5, "good_wpg": 1115.7, "evil_wpg": 1578.0}, {"name": "Duncan", "games": 15, "claims": 45, "lies": 34, "true_": 11, "lie_rate": 0.756, "evil_rate": 0.267, "wpg": 1225.9, "good_wpg": 1201.8, "evil_wpg": 1292.0}, {"name": "Rythian", "games": 17, "claims": 49, "lies": 31, "true_": 18, "lie_rate": 0.633, "evil_rate": 0.235, "wpg": 1755.0, "good_wpg": 1594.8, "evil_wpg": 1920.0}, {"name": "Ravs", "games": 10, "claims": 44, "lies": 24, "true_": 18, "lie_rate": 0.545, "evil_rate": 0.2, "wpg": 1192.1, "good_wpg": 1184.7, "evil_wpg": 1577.5}, {"name": "Sophie", "games": 7, "claims": 33, "lies": 24, "true_": 4, "lie_rate": 0.727, "evil_rate": 0.286, "wpg": 1097.4, "good_wpg": 1256.4, "evil_wpg": 700.0}, {"name": "Ben", "games": 16, "claims": 51, "lies": 24, "true_": 23, "lie_rate": 0.471, "evil_rate": 0.25, "wpg": 1065.5, "good_wpg": 1028.7, "evil_wpg": 1244.0}, {"name": "Zoey", "games": 7, "claims": 35, "lies": 24, "true_": 11, "lie_rate": 0.686, "evil_rate": 0.286, "wpg": 1558.6, "good_wpg": 1814.7, "evil_wpg": 1411.0}, {"name": "RTGame", "games": 6, "claims": 22, "lies": 18, "true_": 4, "lie_rate": 0.818, "evil_rate": 0.5, "wpg": 2037.2, "good_wpg": 2252.3, "evil_wpg": 1822.0}, {"name": "Zylus", "games": 10, "claims": 39, "lies": 13, "true_": 18, "lie_rate": 0.333, "evil_rate": 0.2, "wpg": 1487.6, "good_wpg": 1664.5, "evil_wpg": 1225.0}, {"name": "Briony", "games": 11, "claims": 30, "lies": 13, "true_": 13, "lie_rate": 0.433, "evil_rate": 0.273, "wpg": 1064.5, "good_wpg": 1058.8, "evil_wpg": 1079.7}, {"name": "Mark", "games": 8, "claims": 20, "lies": 12, "true_": 6, "lie_rate": 0.6, "evil_rate": 0.25, "wpg": 1757.8, "good_wpg": 2031.8, "evil_wpg": 1701.0}, {"name": "Tom C", "games": 6, "claims": 21, "lies": 8, "true_": 13, "lie_rate": 0.381, "evil_rate": 0.167, "wpg": 1480.3, "good_wpg": 1398.3, "evil_wpg": 1972.0}, {"name": "Osie", "games": 15, "claims": 29, "lies": 7, "true_": 22, "lie_rate": 0.241, "evil_rate": 0.067, "wpg": 686.9, "good_wpg": 697.2, "evil_wpg": 1110.0}, {"name": "Pyrion", "games": 4, "claims": 18, "lies": 7, "true_": 6, "lie_rate": 0.389, "evil_rate": 0.25, "wpg": 1242.8, "good_wpg": 1547.3, "evil_wpg": 539.0}, {"name": "CRAIG", "games": 1, "claims": 7, "lies": 6, "true_": 1, "lie_rate": 0.857, "evil_rate": 1.0, "wpg": 2223.0, "good_wpg": 0.0, "evil_wpg": 2223.0}, {"name": "Matt", "games": 1, "claims": 6, "lies": 5, "true_": 1, "lie_rate": 0.833, "evil_rate": 1.0, "wpg": 1849.0, "good_wpg": 0.0, "evil_wpg": 1849.0}, {"name": "Pedguin", "games": 4, "claims": 9, "lies": 5, "true_": 4, "lie_rate": 0.556, "evil_rate": 0.0, "wpg": 805.2, "good_wpg": 838.8, "evil_wpg": 0.0}, {"name": "Sullivan", "games": 2, "claims": 9, "lies": 4, "true_": 5, "lie_rate": 0.444, "evil_rate": 0.0, "wpg": 1636.5, "good_wpg": 1636.5, "evil_wpg": 0.0}, {"name": "Daltos", "games": 2, "claims": 8, "lies": 3, "true_": 5, "lie_rate": 0.375, "evil_rate": 0.0, "wpg": 874.0, "good_wpg": 874.0, "evil_wpg": 0.0}, {"name": "Boba", "games": 3, "claims": 3, "lies": 3, "true_": 0, "lie_rate": 1.0, "evil_rate": 0.333, "wpg": 1004.7, "good_wpg": 1385.0, "evil_wpg": 806.0}, {"name": "Trott", "games": 2, "claims": 8, "lies": 3, "true_": 5, "lie_rate": 0.375, "evil_rate": 0.5, "wpg": 1012.0, "good_wpg": 1242.0, "evil_wpg": 1028.0}, {"name": "Dom", "games": 2, "claims": 6, "lies": 3, "true_": 3, "lie_rate": 0.5, "evil_rate": 0.0, "wpg": 1507.0, "good_wpg": 1507.0, "evil_wpg": 0.0}, {"name": "Gee", "games": 3, "claims": 6, "lies": 3, "true_": 3, "lie_rate": 0.5, "evil_rate": 0.0, "wpg": 644.2, "good_wpg": 553.0, "evil_wpg": 0.0}, {"name": "Holly", "games": 2, "claims": 6, "lies": 2, "true_": 4, "lie_rate": 0.333, "evil_rate": 0.0, "wpg": 1903.0, "good_wpg": 1903.0, "evil_wpg": 0.0}, {"name": "BARRY", "games": 1, "claims": 3, "lies": 1, "true_": 2, "lie_rate": 0.333, "evil_rate": 0.0, "wpg": 1376.0, "good_wpg": 1603.0, "evil_wpg": 0.0}, {"name": "ALEX", "games": 2, "claims": 3, "lies": 1, "true_": 2, "lie_rate": 0.333, "evil_rate": 0.5, "wpg": 1114.5, "good_wpg": 1362.0, "evil_wpg": 867.0}, {"name": "Lydia", "games": 2, "claims": 3, "lies": 1, "true_": 2, "lie_rate": 0.333, "evil_rate": 0.0, "wpg": 1052.0, "good_wpg": 1052.0, "evil_wpg": 0.0}, {"name": "Lewis Brindley", "games": 1, "claims": 1, "lies": 0, "true_": 0, "lie_rate": 0.0, "evil_rate": 0.0, "wpg": 2286.0, "good_wpg": 2286.0, "evil_wpg": 0.0}, {"name": "Breeh", "games": 1, "claims": 1, "lies": 0, "true_": 1, "lie_rate": 0.0, "evil_rate": 0.0, "wpg": 1233.0, "good_wpg": 1233.0, "evil_wpg": 0.0}, {"name": "Ross", "games": 2, "claims": 4, "lies": 0, "true_": 4, "lie_rate": 0.0, "evil_rate": 0.0, "wpg": 1578.5, "good_wpg": 1578.5, "evil_wpg": 0.0}, {"name": "Smithy", "games": 1, "claims": 3, "lies": 0, "true_": 0, "lie_rate": 0.0, "evil_rate": 1.0, "wpg": 957.0, "good_wpg": 0.0, "evil_wpg": 957.0}], "wins": {"good": 19, "evil": 16}, "game_records": {"most_lies": {"id": "_EGJi3wg0bE", "title": "Who is the Goblin? - Blood on the Clocktower in Minecraft", "winner": "Good", "claims": 50, "lies": 43, "lie_rate": 0.86}, "most_deceptive": {"id": "O5tknyWOZ6Y", "title": "Vicious Vortox - Blood on the Clocktower in Minecraft", "winner": "Evil", "claims": 11, "lies": 10, "lie_rate": 0.909}, "most_claims": {"id": "_EGJi3wg0bE", "title": "Who is the Goblin? - Blood on the Clocktower in Minecraft", "winner": "Good", "claims": 50, "lies": 43, "lie_rate": 0.86}}, "voice_analysis": [{"name": "Nilesy", "good_wpg": 1856.5, "evil_wpg": 2996.5, "ratio": 1.61, "games": 19}, {"name": "Osie", "good_wpg": 697.2, "evil_wpg": 1110.0, "ratio": 1.59, "games": 15}, {"name": "Kirsty", "good_wpg": 1115.7, "evil_wpg": 1578.0, "ratio": 1.41, "games": 19}, {"name": "Tom C", "good_wpg": 1398.3, "evil_wpg": 1972.0, "ratio": 1.41, "games": 6}, {"name": "Ravs", "good_wpg": 1184.7, "evil_wpg": 1577.5, "ratio": 1.33, "games": 10}, {"name": "Ben", "good_wpg": 1028.7, "evil_wpg": 1244.0, "ratio": 1.21, "games": 16}, {"name": "Rythian", "good_wpg": 1594.8, "evil_wpg": 1920.0, "ratio": 1.2, "games": 17}, {"name": "Duncan", "good_wpg": 1201.8, "evil_wpg": 1292.0, "ratio": 1.08, "games": 15}, {"name": "Briony", "good_wpg": 1058.8, "evil_wpg": 1079.7, "ratio": 1.02, "games": 11}, {"name": "Mark", "good_wpg": 2031.8, "evil_wpg": 1701.0, "ratio": 0.84, "games": 8}, {"name": "RTGame", "good_wpg": 2252.3, "evil_wpg": 1822.0, "ratio": 0.81, "games": 6}, {"name": "Zoey", "good_wpg": 1814.7, "evil_wpg": 1411.0, "ratio": 0.78, "games": 7}, {"name": "Zylus", "good_wpg": 1664.5, "evil_wpg": 1225.0, "ratio": 0.74, "games": 10}, {"name": "Sophie", "good_wpg": 1256.4, "evil_wpg": 700.0, "ratio": 0.56, "games": 7}, {"name": "Pyrion", "good_wpg": 1547.3, "evil_wpg": 539.0, "ratio": 0.35, "games": 4}]};
+const GAMES   = [{"id": "duo_5mvu_a4", "title": "No nights in an Insomniac game - Blood on the Clocktower in Minecraft", "winner": "", "claims": 16, "lies": 7}, {"id": "QbzFmlScLSA", "title": "Yogs Staff play Blood on the Clocktower in Minecraft", "winner": "Evil", "claims": 20, "lies": 11}, {"id": "OPqWyO7h-wM", "title": "When Pitfalls go wrong! - Blood on the Clocktower in  Minecraft BONUS", "winner": "", "claims": 17, "lies": 3}, {"id": "MUoCe_9boaw", "title": "Who will the Klutz choose? - Blood on the Clocktower in Minecraft", "winner": "", "claims": 11, "lies": 1}, {"id": "6AOrG0z4Gog", "title": "Defending each other in a Big Wig - Blood on the Clocktower in Minecraft", "winner": "Good", "claims": 12, "lies": 10}, {"id": "coxvxJ862mY", "title": "Who can trust the Traveller? - Blood on the Clocktower in Minecraft", "winner": "Evil", "claims": 11, "lies": 6}, {"id": "DfPtc23EtGA", "title": "Two Minds, One Body - Blood on the Clocktower in Minecraft", "winner": "Good", "claims": 19, "lies": 8}, {"id": "nZ4CPKMrCnY", "title": "Rock, Paper, Scissors, Psychopath? We choose our own roles! | Blood on the Clocktower Bonus!", "winner": "", "claims": 21, "lies": 8}, {"id": "s_xs104YGo0", "title": "Trick or Treat? - Blood on the Clocktower in Minecraft | Halloween Special", "winner": "Good", "claims": 19, "lies": 4}, {"id": "FVhHMIRhkmY", "title": "Is this the worst Assassin? - Blood on the Clocktower in Minecraft", "winner": "", "claims": 6, "lies": 1}, {"id": "sByVy0JFi90", "title": "Back to basics with our noob players - Blood on the Clocktower in Minecraft", "winner": "Good", "claims": 18, "lies": 8}, {"id": "IUO3Xz1kNkc", "title": "4 evil vs 3 good when we choose our own roles | Blood on the Clocktower Bonus!", "winner": "Evil", "claims": 17, "lies": 5}];
 const EXPLORER = "http://localhost:8501";
+
+// Default: no-goblin dataset (cleaner stats)
+let ACTIVE = DATA_NG;
 
 // ── theme globals & helpers ───────────────────────────────────────────────────
 let _donutChart = null;
 let _barChart   = null;
-let _goblinMode          = false; // false = exclude Goblin (default)
-let _reRenderSuperlatives = null;
-let _reRenderFakeRoles    = null;
-let _reRenderEvilRoles    = null;
 
-function toggleGoblinMode(checked) {
-  _goblinMode = checked;
-  if (_reRenderSuperlatives) _reRenderSuperlatives();
-  if (_reRenderFakeRoles)    _reRenderFakeRoles();
-  if (_reRenderEvilRoles)    _reRenderEvilRoles();
+function toggleGoblin() {
+  ACTIVE = (ACTIVE === DATA_NG) ? DATA : DATA_NG;
+  const showing = (ACTIVE === DATA);
+  const btn = document.getElementById('goblin-toggle');
+  if (btn) btn.textContent = showing ? '🐊 Hide Goblin' : '🐊 Show Goblin';
+  renderAll();
 }
 
 function updateChartTheme() {
@@ -1034,8 +1035,8 @@ function toggleTheme() {
 }
 
 // ── wins scoreboard ────────────────────────────────────────────────────────────
-(function () {
-  const w = DATA.wins || {good: 0, evil: 0};
+function renderWins() {
+  const w = ACTIVE.wins || {good: 0, evil: 0};
   const board = document.getElementById("wins-board");
   if (board) {
     board.innerHTML =
@@ -1058,11 +1059,12 @@ function toggleTheme() {
   const be = document.getElementById("wbar-evil");
   if (bg) bg.style.width = goodPct + "%";
   if (be) be.style.width = evilPct + "%";
-})();
+}
+renderWins();
 
 // ── stat bubbles ──────────────────────────────────────────────────────────────
-(function () {
-  const s = DATA.summary;
+function renderStatBubbles() {
+  const s = ACTIVE.summary;
   const lie_rate = s.claims > 0 ? (s.lies / s.claims * 100).toFixed(1) + "%" : "—";
   const items = [
     [s.games,   "Games"],
@@ -1073,15 +1075,17 @@ function toggleTheme() {
     [lie_rate,  "Lie Rate"],
   ];
   const row = document.getElementById("stat-row");
+  row.innerHTML = '';
   items.forEach(([num, lbl]) => {
     row.innerHTML +=
       `<div class="stat-bubble"><div class="num">${num}</div><div class="lbl">${lbl}</div></div>`;
   });
-})();
+}
+renderStatBubbles();
 
 // ── superlatives ──────────────────────────────────────────────────────────────
-(function () {
-  const sup = DATA.superlatives;
+function renderSuperlatives() {
+  const sup = ACTIVE.superlatives;
   const cards = [
     {
       key: "most_evil", icon: "😈", label: "Most Often Evil",
@@ -1132,13 +1136,13 @@ function toggleTheme() {
       bg: "#1a1430",
     },
     {
-      key: "best_evil_role", icon: "☠️", label: "Best Evil Role",
+      key: "best_evil_role", icon: "☠️", label: "Most Successful Evil Role",
       name:   s => s.role,
       detail: s => `${(s.win_rate*100).toFixed(0)}% win rate (${s.wins}/${s.total_games} games)`,
       bg: "#2a1215",
     },
     {
-      key: "best_good_role", icon: "🛡️", label: "Best Good Role",
+      key: "best_good_role", icon: "🛡️", label: "Most Successful Good Role",
       name:   s => s.role,
       detail: s => `${(s.win_rate*100).toFixed(0)}% win rate (${s.wins}/${s.total_games} games)`,
       bg: "#0e2a1f",
@@ -1146,35 +1150,34 @@ function toggleTheme() {
   ];
 
   const grid = document.getElementById("sup-grid");
-  function render() {
-    grid.innerHTML = '';
-    cards.forEach(c => {
-      let data = sup[c.key];
-      // Suppress Goblin in role-based superlatives when goblin mode is off
-      if (!_goblinMode && data && data.role === 'goblin' &&
-          (c.key === 'most_faked_role' || c.key === 'best_evil_role')) {
-        data = null;
-      }
-      const html = data
-        ? `<div class="icon">${c.icon}</div>
-           <div class="label">${c.label}</div>
-           <div class="player">${c.name(data)}</div>
-           <div class="detail">${c.detail(data)}</div>`
-        : `<div class="icon">${c.icon}</div>
-           <div class="label">${c.label}</div>
-           <div class="player" style="color:var(--muted)">—</div>`;
-      grid.innerHTML +=
-        `<div class="sup-card" style="border-color:${c.bg === "#2a1215" ? "#5a1f1f" :
-          c.bg === "#0e1f2a" ? "#1e3a5a" : "var(--border)"};background:${c.bg}">${html}</div>`;
-    });
-  }
-  _reRenderSuperlatives = render;
-  render();
-})();
+  grid.innerHTML = '';
+  cards.forEach(c => {
+    const data = sup[c.key];
+    const html = data
+      ? `<div class="icon">${c.icon}</div>
+         <div class="label">${c.label}</div>
+         <div class="player">${c.name(data)}</div>
+         <div class="detail">${c.detail(data)}</div>`
+      : `<div class="icon">${c.icon}</div>
+         <div class="label">${c.label}</div>
+         <div class="player" style="color:var(--muted)">—</div>`;
+    grid.innerHTML +=
+      `<div class="sup-card" style="border-color:${c.bg === "#2a1215" ? "#5a1f1f" :
+        c.bg === "#0e1f2a" ? "#1e3a5a" : "var(--border)"};background:${c.bg}">${html}</div>`;
+  });
+}
+renderSuperlatives();
 
 // ── doughnut chart ────────────────────────────────────────────────────────────
-(function () {
-  const s = DATA.summary;
+function renderDonut() {
+  const s = ACTIVE.summary;
+  if (_donutChart) {
+    _donutChart.data.datasets[0].data = [s.lies, s.true, s.unverified, s.hm];
+    _donutChart.options.plugins.tooltip.callbacks.label =
+      ctx => ` ${ctx.label}: ${ctx.parsed} (${(ctx.parsed/(s.claims||1)*100).toFixed(1)}%)`;
+    _donutChart.update();
+    return;
+  }
   _donutChart = new Chart(document.getElementById("donut-chart"), {
     type: "doughnut",
     data: {
@@ -1206,22 +1209,30 @@ function toggleTheme() {
       cutout: "68%",
     },
   });
-})();
+}
+renderDonut();
 
 // ── horizontal bar chart (top liars) ──────────────────────────────────────────
-(function () {
-  const liars = DATA.top_liars;
+function renderBarChart() {
+  const liars = ACTIVE.top_liars;
   if (!liars.length) return;
   const labels = liars.map(x => x.name);
   const lies   = liars.map(x => x.lies);
   const rates  = liars.map(x => x.lie_rate);
-  // Color each bar by lie_rate: low = amber, high = red
   const colors = rates.map(r => {
     const t = Math.min(r, 1);
-    const red = Math.round(220 + t * (220 - 220));
     return `rgba(220, ${Math.round(38 + (1-t)*140)}, ${Math.round(38 + (1-t)*100)}, 0.85)`;
   });
-
+  if (_barChart) {
+    _barChart.data.labels = labels;
+    _barChart.data.datasets[0].data = lies;
+    _barChart.data.datasets[0].backgroundColor = colors;
+    // Rebuild tooltip closure with new rates
+    _barChart.options.plugins.tooltip.callbacks.label =
+      ctx => ` ${ctx.parsed.x} lies · ${(rates[ctx.dataIndex]*100).toFixed(0)}% lie rate`;
+    _barChart.update();
+    return;
+  }
   _barChart = new Chart(document.getElementById("bar-chart"), {
     type: "bar",
     data: {
@@ -1255,16 +1266,17 @@ function toggleTheme() {
       },
     },
   });
-})();
+}
+renderBarChart();
 
 // ── most-faked roles table (collapsible) ──────────────────────────────────────
-(function () {
+function renderFakeRoles() {
   const LIMIT = 10;
   let expanded = false;
   const tbody = document.getElementById("fake-roles-body");
 
   function render() {
-    const rows = (DATA.fake_roles || []).filter(r => _goblinMode || r.role !== 'goblin');
+    const rows = ACTIVE.fake_roles || [];
     if (!rows.length) {
       tbody.innerHTML = `<tr><td colspan="4" class="empty">No lie data yet.</td></tr>`;
       return;
@@ -1289,13 +1301,13 @@ function toggleTheme() {
       td.appendChild(btn); tr.appendChild(td); tbody.appendChild(tr);
     }
   }
-  _reRenderFakeRoles = render;
   render();
-})();
+}
+renderFakeRoles();
 
 // ── roles tables (split Evil / Good, collapsible) ─────────────────────────────
-(function () {
-  function renderRoles(roles, tbodyId, barColor) {
+function renderRoles() {
+  function renderRoleTable(roles, tbodyId, barColor) {
     const LIMIT = 10;
     let expanded = false;
     const tbody = document.getElementById(tbodyId);
@@ -1336,16 +1348,12 @@ function toggleTheme() {
     render();
   }
 
-  const goodRoles = DATA.roles.filter(r => r.team === "Good");
-  renderRoles(goodRoles, "good-roles-body", "#2563eb");
-
-  function renderEvil() {
-    const evilRoles = DATA.roles.filter(r => r.team === "Evil" && (_goblinMode || r.role !== 'goblin'));
-    renderRoles(evilRoles, "evil-roles-body", "#dc2626");
-  }
-  _reRenderEvilRoles = renderEvil;
-  renderEvil();
-})();
+  const goodRoles = ACTIVE.roles.filter(r => r.team === "Good");
+  renderRoleTable(goodRoles, "good-roles-body", "#2563eb");
+  const evilRoles = ACTIVE.roles.filter(r => r.team === "Evil");
+  renderRoleTable(evilRoles, "evil-roles-body", "#dc2626");
+}
+renderRoles();
 
 // ── games grid ────────────────────────────────────────────────────────────────
 (function () {
@@ -1372,10 +1380,11 @@ function toggleTheme() {
 })();
 
 // ── game records ─────────────────────────────────────────────────────────────
-(function () {
-  const rec  = DATA.game_records || {};
+function renderGameRecords() {
+  const rec  = ACTIVE.game_records || {};
   const grid = document.getElementById('game-records-grid');
   if (!grid) return;
+  grid.innerHTML = '';
   const cards = [
     { key: 'most_lies',      icon: '🤥', label: 'Most Lies in One Game',
        stat: r => `${r.lies} lies · ${(r.lie_rate*100).toFixed(0)}% lie rate`, bg: '#2a1215' },
@@ -1401,13 +1410,15 @@ function toggleTheme() {
         </div>
       </div>`;
   });
-})();
+}
+renderGameRecords();
 
 // ── voice analysis table ──────────────────────────────────────────────────────
-(function () {
-  const rows  = DATA.voice_analysis || [];
+function renderVoiceAnalysis() {
+  const rows  = ACTIVE.voice_analysis || [];
   const tbody = document.getElementById('voice-body');
   if (!tbody) return;
+  tbody.innerHTML = '';
   if (!rows.length) {
     tbody.innerHTML = `<tr><td colspan="4" class="empty" style="padding:32px">Not enough data yet (need ≥4 games on each team).</td></tr>`;
     return;
@@ -1429,7 +1440,21 @@ function toggleTheme() {
         </td>
       </tr>`;
   });
-})();
+}
+renderVoiceAnalysis();
+
+// ── master re-render (called by toggleGoblin) ─────────────────────────────────
+function renderAll() {
+  renderWins();
+  renderStatBubbles();
+  renderSuperlatives();
+  renderDonut();
+  renderBarChart();
+  renderFakeRoles();
+  renderRoles();
+  renderGameRecords();
+  renderVoiceAnalysis();
+}
 
 // ── restore saved theme ───────────────────────────────────────────────────────
 (function () {
