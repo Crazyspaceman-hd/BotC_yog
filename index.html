@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>🏰 BotC · Yogscast Lie Tracker</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg:        #0f0f1a;
+  --surface:   #161625;
+  --surface2:  #1e1e35;
+  --border:    #2a2a45;
+  --text:      #e2e8f0;
+  --muted:     #8892a4;
+  --evil:      #dc2626;
+  --evil-dim:  #7f1d1d;
+  --good:      #2563eb;
+  --good-dim:  #1e3a8a;
+  --gold:      #f59e0b;
+  --green:     #16a34a;
+  --radius:    12px;
+  --shadow:    0 4px 24px rgba(0,0,0,.5);
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+a { color: var(--gold); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ── layout ── */
+.container { max-width: 1100px; margin: 0 auto; padding: 0 20px; }
+
+/* ── header / hero ── */
+header {
+  background: linear-gradient(160deg, #12122a 0%, #1a0a0a 100%);
+  border-bottom: 1px solid var(--border);
+  padding: 48px 20px 40px;
+  text-align: center;
+}
+.hero-title {
+  font-size: clamp(2rem, 5vw, 3.2rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, #fbbf24 0%, #f87171 60%, #a78bfa 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 8px;
+}
+.hero-sub {
+  color: var(--muted);
+  font-size: 1.05rem;
+  margin-bottom: 32px;
+}
+.stat-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 28px;
+}
+.stat-bubble {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 10px 22px;
+  text-align: center;
+  min-width: 110px;
+}
+.stat-bubble .num {
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--gold);
+}
+.stat-bubble .lbl {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.btn-explore {
+  display: inline-block;
+  background: linear-gradient(135deg, #7c3aed, #dc2626);
+  color: #fff !important;
+  font-weight: 700;
+  font-size: 0.95rem;
+  padding: 12px 32px;
+  border-radius: 999px;
+  text-decoration: none !important;
+  letter-spacing: .03em;
+  box-shadow: 0 0 20px rgba(124,58,237,.4);
+  transition: transform .15s, box-shadow .15s;
+}
+.btn-explore:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 30px rgba(124,58,237,.6);
+}
+
+/* ── sections ── */
+section {
+  padding: 48px 0 16px;
+}
+.section-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--muted);
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.section-title::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* ── superlative cards ── */
+.sup-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 14px;
+  margin-bottom: 32px;
+}
+.sup-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 16px;
+  transition: transform .15s, box-shadow .15s;
+}
+.sup-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow);
+}
+.sup-card .icon { font-size: 1.8rem; margin-bottom: 6px; }
+.sup-card .label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.sup-card .player {
+  font-size: 1.05rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sup-card .detail {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+/* ── charts row ── */
+.charts-row {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 20px;
+  margin-bottom: 32px;
+}
+@media (max-width: 700px) {
+  .charts-row { grid-template-columns: 1fr; }
+}
+.chart-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+.chart-card h3 {
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted);
+  margin-bottom: 16px;
+}
+.chart-wrap {
+  position: relative;
+  width: 100%;
+}
+
+/* ── roles table ── */
+.table-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 32px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+thead th {
+  background: var(--surface2);
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+tbody tr {
+  border-bottom: 1px solid var(--border);
+  transition: background .1s;
+}
+tbody tr:last-child { border-bottom: none; }
+tbody tr:hover { background: var(--surface2); }
+td {
+  padding: 9px 14px;
+  vertical-align: middle;
+}
+.team-evil {
+  color: #fca5a5;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.team-good {
+  color: #93c5fd;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.rate-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rate-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  min-width: 60px;
+}
+.rate-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--evil);
+}
+
+/* ── recent games grid ── */
+.games-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+  margin-bottom: 32px;
+}
+.game-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  transition: transform .15s, box-shadow .15s;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.game-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+}
+.game-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.game-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  padding: 2px 9px;
+  border-radius: 999px;
+  text-transform: uppercase;
+}
+.badge-evil   { background: var(--evil-dim);  color: #fca5a5; }
+.badge-good   { background: var(--good-dim);  color: #93c5fd; }
+.badge-none   { background: var(--surface2);  color: var(--muted); }
+.game-stats {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.game-link {
+  font-size: 0.75rem;
+  color: var(--gold);
+}
+
+/* ── footer ── */
+footer {
+  border-top: 1px solid var(--border);
+  padding: 24px 20px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+footer a { color: var(--gold); }
+
+/* ── empty state ── */
+.empty {
+  text-align: center;
+  padding: 48px;
+  color: var(--muted);
+  font-size: 1rem;
+}
+
+/* ── roles split grid ── */
+.roles-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 32px;
+}
+@media (max-width: 700px) {
+  .roles-row { grid-template-columns: 1fr; }
+}
+.roles-team-hdr {
+  padding: 10px 14px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  border-bottom: 1px solid var(--border);
+}
+.roles-evil-hdr { background: #200d0d; color: #fca5a5; }
+.roles-good-hdr { background: #0a1120; color: #93c5fd; }
+
+/* ── Evil vs Good wins scoreboard ── */
+.wins-board {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  margin: 28px auto 12px;
+  max-width: 520px;
+}
+.wins-side {
+  text-align: center;
+  flex: 1;
+}
+.wins-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.wins-good .wins-label { color: #93c5fd; }
+.wins-evil .wins-label { color: #fca5a5; }
+.wins-num {
+  font-size: clamp(3.5rem, 9vw, 5.5rem);
+  font-weight: 900;
+  line-height: 1;
+}
+.wins-good .wins-num {
+  color: #60a5fa;
+  text-shadow: 0 0 40px rgba(96,165,250,.45);
+}
+.wins-evil .wins-num {
+  color: #f87171;
+  text-shadow: 0 0 40px rgba(248,113,113,.45);
+}
+.wins-sub {
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  margin-top: 2px;
+}
+.wins-vs {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--muted);
+  flex: 0 0 auto;
+  padding: 0 4px;
+}
+.wins-bar-wrap {
+  max-width: 520px;
+  margin: 0 auto 28px;
+  height: 7px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--border);
+  display: flex;
+}
+.wins-bar-good {
+  height: 100%;
+  background: linear-gradient(90deg, #1e40af, #3b82f6);
+  transition: width .8s cubic-bezier(.4,0,.2,1);
+}
+.wins-bar-evil {
+  height: 100%;
+  background: linear-gradient(90deg, #dc2626, #b91c1c);
+  transition: width .8s cubic-bezier(.4,0,.2,1);
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hero-title">🏰 Blood on the Clocktower</div>
+  <div class="hero-sub">Yogscast &middot; Automated lie detection across every game</div>
+
+  <div class="wins-board" id="wins-board"></div>
+  <div class="wins-bar-wrap" id="wins-bar-wrap">
+    <div class="wins-bar-good" id="wbar-good"></div>
+    <div class="wins-bar-evil" id="wbar-evil"></div>
+  </div>
+
+  <div class="stat-row" id="stat-row"></div>
+  <a class="btn-explore" href="http://localhost:8501" target="_blank">▶&nbsp; Open Full Explorer</a>
+</header>
+
+<main class="container">
+
+  <section>
+    <div class="section-title"><span>🏆</span> Superlatives</div>
+    <div class="sup-grid" id="sup-grid"></div>
+  </section>
+
+  <section>
+    <div class="section-title"><span>📊</span> Lie Breakdown</div>
+    <div class="charts-row">
+      <div class="chart-card">
+        <h3>Verdict split</h3>
+        <div class="chart-wrap" style="max-width:240px;margin:0 auto;">
+          <canvas id="donut-chart"></canvas>
+        </div>
+      </div>
+      <div class="chart-card">
+        <h3>Top liars by lie count</h3>
+        <div class="chart-wrap">
+          <canvas id="bar-chart"></canvas>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-title"><span>🎭</span> Role Breakdown <span style="font-size:.8rem;font-weight:400;margin-left:4px;">(min 3 claims)</span></div>
+
+    <div class="table-card" style="margin-bottom:20px">
+      <div class="roles-team-hdr" style="background:#1a1430;color:#c4b5fd;border-bottom:1px solid var(--border)">🎭 Roles Most Often Faked <span style="font-size:.78rem;font-weight:400;opacity:.7">(min 2 lies · sorted by times faked)</span></div>
+      <table>
+        <thead>
+          <tr>
+            <th>Claimed Role</th>
+            <th>Team</th>
+            <th>Times Faked</th>
+            <th>Unique Liars</th>
+          </tr>
+        </thead>
+        <tbody id="fake-roles-body"></tbody>
+      </table>
+    </div>
+
+    <div class="roles-row">
+      <div class="table-card">
+        <div class="roles-team-hdr roles-evil-hdr">😈 Evil Roles</div>
+        <table>
+          <thead><tr><th>Role</th><th>Claims</th><th>Lies</th><th>Lie rate</th></tr></thead>
+          <tbody id="evil-roles-body"></tbody>
+        </table>
+      </div>
+      <div class="table-card">
+        <div class="roles-team-hdr roles-good-hdr">😇 Good Roles</div>
+        <table>
+          <thead><tr><th>Role</th><th>Claims</th><th>Lies</th><th>Lie rate</th></tr></thead>
+          <tbody id="good-roles-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-title"><span>🎮</span> Recent Games</div>
+    <div class="games-grid" id="games-grid"></div>
+  </section>
+
+</main>
+
+<footer>
+  Generated 2026-03-02 04:35 UTC &middot;
+  <a href="http://localhost:8501" target="_blank">▶ Open full explorer</a>
+</footer>
+
+<script>
+const DATA   = {"summary": {"games": 40, "players": 33, "claims": 768, "lies": 409, "true": 299, "hm": 37, "unverified": 23}, "superlatives": {"most_evil": {"player_name": "RTGame", "games": 6, "evil_g": 3, "good_g": 3, "claims": 25, "lies": 21, "true_": 4, "lie_rate": 0.84, "evil_rate": 0.5, "good_rate": 0.5}, "most_good": {"player_name": "Osie", "games": 15, "evil_g": 1, "good_g": 14, "claims": 29, "lies": 7, "true_": 22, "lie_rate": 0.241, "evil_rate": 0.067, "good_rate": 0.933}, "biggest_liar": {"player_name": "RTGame", "games": 6, "evil_g": 3, "good_g": 3, "claims": 25, "lies": 21, "true_": 4, "lie_rate": 0.84, "evil_rate": 0.5, "good_rate": 0.5}, "most_honest": {"player_name": "Osie", "games": 15, "evil_g": 1, "good_g": 14, "claims": 29, "lies": 7, "true_": 22, "lie_rate": 0.241, "evil_rate": 0.067, "good_rate": 0.933}, "traitor": {"player_name": "Nilesy", "good_lies": 52}, "most_games": {"player_name": "Kirsty", "games": 20, "evil_g": 2, "good_g": 18, "claims": 81, "lies": 39, "true_": 42, "lie_rate": 0.481, "evil_rate": 0.1, "good_rate": 0.9}, "most_talkative": {"player_name": "RTGame", "wpg": 2037.0, "games": 6}}, "top_liars": [{"name": "Nilesy", "lies": 60, "lie_rate": 0.541}, {"name": "Kirsty", "lies": 39, "lie_rate": 0.481}, {"name": "Duncan", "lies": 34, "lie_rate": 0.756}, {"name": "Zoey", "lies": 33, "lie_rate": 0.733}, {"name": "Rythian", "lies": 31, "lie_rate": 0.633}, {"name": "Ravs", "lies": 30, "lie_rate": 0.6}, {"name": "Ben", "lies": 27, "lie_rate": 0.5}, {"name": "Sophie", "lies": 24, "lie_rate": 0.727}, {"name": "RTGame", "lies": 21, "lie_rate": 0.84}, {"name": "Tom C", "lies": 15, "lie_rate": 0.536}], "fake_roles": [{"role": "goblin", "team": "Good", "times_faked": 47, "unique_liars": 7}, {"role": "fortune teller", "team": "Good", "times_faked": 25, "unique_liars": 9}, {"role": "dreamer", "team": "Good", "times_faked": 25, "unique_liars": 13}, {"role": "empath", "team": "Good", "times_faked": 21, "unique_liars": 7}, {"role": "farmer", "team": "Good", "times_faked": 18, "unique_liars": 7}, {"role": "ogre", "team": "Good", "times_faked": 16, "unique_liars": 8}, {"role": "seamstress", "team": "Good", "times_faked": 16, "unique_liars": 6}, {"role": "undertaker", "team": "Good", "times_faked": 15, "unique_liars": 5}, {"role": "mayor", "team": "Good", "times_faked": 13, "unique_liars": 6}, {"role": "slayer", "team": "Good", "times_faked": 12, "unique_liars": 6}, {"role": "drunk", "team": "Good", "times_faked": 11, "unique_liars": 8}, {"role": "recluse", "team": "Good", "times_faked": 11, "unique_liars": 2}, {"role": "gambler", "team": "Good", "times_faked": 11, "unique_liars": 5}, {"role": "marionette", "team": "Evil", "times_faked": 10, "unique_liars": 5}, {"role": "saint", "team": "Good", "times_faked": 9, "unique_liars": 5}, {"role": "lunatic", "team": "Good", "times_faked": 8, "unique_liars": 4}, {"role": "amnesiac", "team": "Good", "times_faked": 7, "unique_liars": 4}, {"role": "balloonist", "team": "Good", "times_faked": 7, "unique_liars": 4}, {"role": "damsel", "team": "Good", "times_faked": 7, "unique_liars": 5}, {"role": "grandmother", "team": "Good", "times_faked": 7, "unique_liars": 5}, {"role": "knight", "team": "Good", "times_faked": 7, "unique_liars": 3}, {"role": "lord of typhon", "team": "Good", "times_faked": 6, "unique_liars": 3}, {"role": "virgin", "team": "Good", "times_faked": 6, "unique_liars": 3}, {"role": "butler", "team": "Good", "times_faked": 6, "unique_liars": 3}, {"role": "zealot", "team": "Good", "times_faked": 6, "unique_liars": 1}, {"role": "monk", "team": "Good", "times_faked": 6, "unique_liars": 3}, {"role": "chef", "team": "Good", "times_faked": 5, "unique_liars": 3}, {"role": "imp", "team": "Evil", "times_faked": 5, "unique_liars": 4}, {"role": "high priestess", "team": "Good", "times_faked": 5, "unique_liars": 1}, {"role": "cannibal", "team": "Good", "times_faked": 4, "unique_liars": 1}, {"role": "pixie", "team": "Good", "times_faked": 4, "unique_liars": 1}, {"role": "investigator", "team": "Good", "times_faked": 4, "unique_liars": 3}, {"role": "acrobat", "team": "Good", "times_faked": 3, "unique_liars": 1}, {"role": "washerwoman", "team": "Good", "times_faked": 3, "unique_liars": 2}, {"role": "librarian", "team": "Good", "times_faked": 3, "unique_liars": 3}, {"role": "noble", "team": "Good", "times_faked": 3, "unique_liars": 2}, {"role": "po", "team": "Evil", "times_faked": 3, "unique_liars": 3}, {"role": "snake charmer", "team": "Good", "times_faked": 3, "unique_liars": 2}, {"role": "sweetheart", "team": "Good", "times_faked": 3, "unique_liars": 1}, {"role": "oracle", "team": "Good", "times_faked": 2, "unique_liars": 2}, {"role": "poppy grower", "team": "Good", "times_faked": 2, "unique_liars": 2}, {"role": "soldier", "team": "Good", "times_faked": 2, "unique_liars": 2}, {"role": "town crier", "team": "Good", "times_faked": 2, "unique_liars": 2}, {"role": "widow", "team": "Good", "times_faked": 2, "unique_liars": 2}], "roles": [{"role": "al-hadikhia", "team": "Evil", "claims": 10, "lies": 10, "lie_rate": 1.0}, {"role": "alchemist", "team": "Good", "claims": 7, "lies": 7, "lie_rate": 1.0}, {"role": "alsaahir", "team": "Good", "claims": 4, "lies": 4, "lie_rate": 1.0}, {"role": "cerenovus", "team": "Evil", "claims": 6, "lies": 6, "lie_rate": 1.0}, {"role": "fang gu", "team": "Evil", "claims": 3, "lies": 3, "lie_rate": 1.0}, {"role": "night watchman", "team": "Good", "claims": 3, "lies": 3, "lie_rate": 1.0}, {"role": "ojo", "team": "Evil", "claims": 5, "lies": 5, "lie_rate": 1.0}, {"role": "wizard", "team": "Good", "claims": 4, "lies": 4, "lie_rate": 1.0}, {"role": "pukka", "team": "Evil", "claims": 3, "lies": 3, "lie_rate": 1.0}, {"role": "politician", "team": "Good", "claims": 6, "lies": 6, "lie_rate": 1.0}, {"role": "nightwatchman", "team": "Good", "claims": 8, "lies": 8, "lie_rate": 1.0}, {"role": "poppy grower", "team": "Good", "claims": 3, "lies": 3, "lie_rate": 1.0}, {"role": "imp", "team": "Evil", "claims": 33, "lies": 31, "lie_rate": 0.939}, {"role": "virgin", "team": "Good", "claims": 15, "lies": 14, "lie_rate": 0.933}, {"role": "boffin", "team": "Good", "claims": 20, "lies": 18, "lie_rate": 0.9}, {"role": "goblin", "team": "Good", "claims": 10, "lies": 9, "lie_rate": 0.9}, {"role": "witch", "team": "Evil", "claims": 13, "lies": 11, "lie_rate": 0.846}, {"role": "seamstress", "team": "Good", "claims": 22, "lies": 18, "lie_rate": 0.818}, {"role": "legion", "team": "Evil", "claims": 10, "lies": 8, "lie_rate": 0.8}, {"role": "scarlet woman", "team": "Evil", "claims": 9, "lies": 7, "lie_rate": 0.778}, {"role": "oracle", "team": "Good", "claims": 13, "lies": 10, "lie_rate": 0.769}, {"role": "pixie", "team": "Good", "claims": 4, "lies": 3, "lie_rate": 0.75}, {"role": "huntsman", "team": "Good", "claims": 4, "lies": 3, "lie_rate": 0.75}, {"role": "lord of typhon", "team": "Good", "claims": 14, "lies": 10, "lie_rate": 0.714}, {"role": "librarian", "team": "Good", "claims": 6, "lies": 4, "lie_rate": 0.667}, {"role": "bounty hunter", "team": "Good", "claims": 3, "lies": 2, "lie_rate": 0.667}, {"role": "amnesiac", "team": "Good", "claims": 22, "lies": 14, "lie_rate": 0.636}, {"role": "harpy", "team": "Evil", "claims": 11, "lies": 7, "lie_rate": 0.636}, {"role": "poisoner", "team": "Evil", "claims": 13, "lies": 8, "lie_rate": 0.615}, {"role": "ravenkeeper", "team": "Good", "claims": 13, "lies": 8, "lie_rate": 0.615}, {"role": "lycanthrope", "team": "Good", "claims": 5, "lies": 3, "lie_rate": 0.6}, {"role": "investigator", "team": "Good", "claims": 12, "lies": 7, "lie_rate": 0.583}, {"role": "fisherman", "team": "Good", "claims": 14, "lies": 8, "lie_rate": 0.571}, {"role": "grandmother", "team": "Good", "claims": 16, "lies": 9, "lie_rate": 0.562}, {"role": "lunatic", "team": "Good", "claims": 20, "lies": 11, "lie_rate": 0.55}, {"role": "noble", "team": "Good", "claims": 30, "lies": 15, "lie_rate": 0.5}, {"role": "baron", "team": "Evil", "claims": 4, "lies": 2, "lie_rate": 0.5}, {"role": "widow", "team": "Good", "claims": 4, "lies": 2, "lie_rate": 0.5}, {"role": "marionette", "team": "Evil", "claims": 21, "lies": 10, "lie_rate": 0.476}, {"role": "town crier", "team": "Good", "claims": 14, "lies": 6, "lie_rate": 0.429}, {"role": "undertaker", "team": "Good", "claims": 10, "lies": 4, "lie_rate": 0.4}, {"role": "soldier", "team": "Good", "claims": 5, "lies": 2, "lie_rate": 0.4}, {"role": "empath", "team": "Good", "claims": 28, "lies": 11, "lie_rate": 0.393}, {"role": "farmer", "team": "Good", "claims": 26, "lies": 10, "lie_rate": 0.385}, {"role": "ogre", "team": "Good", "claims": 13, "lies": 5, "lie_rate": 0.385}, {"role": "artist", "team": "Good", "claims": 3, "lies": 1, "lie_rate": 0.333}, {"role": "chef", "team": "Good", "claims": 3, "lies": 1, "lie_rate": 0.333}, {"role": "gambler", "team": "Good", "claims": 3, "lies": 1, "lie_rate": 0.333}, {"role": "damsel", "team": "Good", "claims": 3, "lies": 1, "lie_rate": 0.333}, {"role": "savant", "team": "Good", "claims": 3, "lies": 1, "lie_rate": 0.333}, {"role": "recluse", "team": "Good", "claims": 3, "lies": 1, "lie_rate": 0.333}, {"role": "dreamer", "team": "Good", "claims": 36, "lies": 12, "lie_rate": 0.333}, {"role": "cannibal", "team": "Good", "claims": 29, "lies": 8, "lie_rate": 0.276}, {"role": "fortune teller", "team": "Good", "claims": 29, "lies": 7, "lie_rate": 0.241}, {"role": "drunk", "team": "Good", "claims": 42, "lies": 10, "lie_rate": 0.238}, {"role": "cult leader", "team": "Good", "claims": 9, "lies": 2, "lie_rate": 0.222}, {"role": "knight", "team": "Good", "claims": 14, "lies": 3, "lie_rate": 0.214}, {"role": "professor", "team": "Good", "claims": 7, "lies": 1, "lie_rate": 0.143}, {"role": "acrobat", "team": "Good", "claims": 8, "lies": 1, "lie_rate": 0.125}, {"role": "fool", "team": "Good", "claims": 3, "lies": 0, "lie_rate": 0.0}, {"role": "snake charmer", "team": "Good", "claims": 5, "lies": 0, "lie_rate": 0.0}, {"role": "sweetheart", "team": "Good", "claims": 6, "lies": 0, "lie_rate": 0.0}], "players": [{"name": "Nilesy", "games": 19, "claims": 111, "lies": 60, "true_": 47, "lie_rate": 0.541, "evil_rate": 0.105, "wpg": 1961.0}, {"name": "Kirsty", "games": 20, "claims": 81, "lies": 39, "true_": 42, "lie_rate": 0.481, "evil_rate": 0.1, "wpg": 1171.5}, {"name": "Duncan", "games": 15, "claims": 45, "lies": 34, "true_": 11, "lie_rate": 0.756, "evil_rate": 0.267, "wpg": 1225.9}, {"name": "Zoey", "games": 8, "claims": 45, "lies": 33, "true_": 12, "lie_rate": 0.733, "evil_rate": 0.25, "wpg": 1558.6}, {"name": "Rythian", "games": 17, "claims": 49, "lies": 31, "true_": 18, "lie_rate": 0.633, "evil_rate": 0.235, "wpg": 1755.0}, {"name": "Ravs", "games": 11, "claims": 50, "lies": 30, "true_": 18, "lie_rate": 0.6, "evil_rate": 0.182, "wpg": 1192.1}, {"name": "Ben", "games": 16, "claims": 54, "lies": 27, "true_": 23, "lie_rate": 0.5, "evil_rate": 0.25, "wpg": 1065.5}, {"name": "Sophie", "games": 7, "claims": 33, "lies": 24, "true_": 4, "lie_rate": 0.727, "evil_rate": 0.286, "wpg": 1097.4}, {"name": "RTGame", "games": 6, "claims": 25, "lies": 21, "true_": 4, "lie_rate": 0.84, "evil_rate": 0.5, "wpg": 2037.2}, {"name": "Tom C", "games": 7, "claims": 28, "lies": 15, "true_": 13, "lie_rate": 0.536, "evil_rate": 0.143, "wpg": 1480.3}, {"name": "Zylus", "games": 10, "claims": 39, "lies": 13, "true_": 18, "lie_rate": 0.333, "evil_rate": 0.2, "wpg": 1487.6}, {"name": "Briony", "games": 11, "claims": 30, "lies": 13, "true_": 13, "lie_rate": 0.433, "evil_rate": 0.273, "wpg": 1064.5}, {"name": "Mark", "games": 8, "claims": 20, "lies": 12, "true_": 6, "lie_rate": 0.6, "evil_rate": 0.25, "wpg": 1757.8}, {"name": "Osie", "games": 15, "claims": 29, "lies": 7, "true_": 22, "lie_rate": 0.241, "evil_rate": 0.067, "wpg": 686.9}, {"name": "Pyrion", "games": 4, "claims": 18, "lies": 7, "true_": 6, "lie_rate": 0.389, "evil_rate": 0.25, "wpg": 1242.8}, {"name": "Dom", "games": 2, "claims": 9, "lies": 6, "true_": 3, "lie_rate": 0.667, "evil_rate": 0.0, "wpg": 1507.0}, {"name": "CRAIG", "games": 1, "claims": 7, "lies": 6, "true_": 1, "lie_rate": 0.857, "evil_rate": 1.0, "wpg": 2223.0}, {"name": "Pedguin", "games": 4, "claims": 9, "lies": 5, "true_": 4, "lie_rate": 0.556, "evil_rate": 0.0, "wpg": 805.2}, {"name": "Matt", "games": 1, "claims": 6, "lies": 5, "true_": 1, "lie_rate": 0.833, "evil_rate": 1.0, "wpg": 1849.0}, {"name": "Sullivan", "games": 2, "claims": 9, "lies": 4, "true_": 5, "lie_rate": 0.444, "evil_rate": 0.0, "wpg": 1636.5}, {"name": "Trott", "games": 2, "claims": 8, "lies": 3, "true_": 5, "lie_rate": 0.375, "evil_rate": 0.5, "wpg": 1012.0}, {"name": "Boba", "games": 3, "claims": 3, "lies": 3, "true_": 0, "lie_rate": 1.0, "evil_rate": 0.333, "wpg": 1004.7}, {"name": "Daltos", "games": 2, "claims": 8, "lies": 3, "true_": 5, "lie_rate": 0.375, "evil_rate": 0.0, "wpg": 874.0}, {"name": "Gee", "games": 3, "claims": 6, "lies": 3, "true_": 3, "lie_rate": 0.5, "evil_rate": 0.0, "wpg": 644.2}, {"name": "Holly", "games": 2, "claims": 6, "lies": 2, "true_": 4, "lie_rate": 0.333, "evil_rate": 0.0, "wpg": 1903.0}, {"name": "ALEX", "games": 2, "claims": 3, "lies": 1, "true_": 2, "lie_rate": 0.333, "evil_rate": 0.5, "wpg": 1114.5}, {"name": "Lydia", "games": 2, "claims": 3, "lies": 1, "true_": 2, "lie_rate": 0.333, "evil_rate": 0.0, "wpg": 1052.0}, {"name": "BARRY", "games": 1, "claims": 3, "lies": 1, "true_": 2, "lie_rate": 0.333, "evil_rate": 0.0, "wpg": 1376.0}, {"name": "Breeh", "games": 1, "claims": 1, "lies": 0, "true_": 1, "lie_rate": 0.0, "evil_rate": 0.0, "wpg": 1233.0}, {"name": "Lewis Brindley", "games": 1, "claims": 1, "lies": 0, "true_": 0, "lie_rate": 0.0, "evil_rate": 0.0, "wpg": 2286.0}, {"name": "Ross", "games": 2, "claims": 4, "lies": 0, "true_": 4, "lie_rate": 0.0, "evil_rate": 0.0, "wpg": 1578.5}, {"name": "Smithy", "games": 1, "claims": 3, "lies": 0, "true_": 0, "lie_rate": 0.0, "evil_rate": 1.0, "wpg": 957.0}, {"name": "UNKNOWN", "games": 1, "claims": 1, "lies": 0, "true_": 0, "lie_rate": 0.0, "evil_rate": 0.0, "wpg": 0.0}], "wins": {"good": 19, "evil": 16}};
+const GAMES  = [{"id": "duo_5mvu_a4", "title": "No nights in an Insomniac game - Blood on the Clocktower in Minecraft", "winner": "", "claims": 16, "lies": 7}, {"id": "QbzFmlScLSA", "title": "Yogs Staff play Blood on the Clocktower in Minecraft", "winner": "Evil", "claims": 20, "lies": 11}, {"id": "OPqWyO7h-wM", "title": "When Pitfalls go wrong! - Blood on the Clocktower in  Minecraft BONUS", "winner": "", "claims": 17, "lies": 3}, {"id": "MUoCe_9boaw", "title": "Who will the Klutz choose? - Blood on the Clocktower in Minecraft", "winner": "", "claims": 11, "lies": 1}, {"id": "6AOrG0z4Gog", "title": "Defending each other in a Big Wig - Blood on the Clocktower in Minecraft", "winner": "Good", "claims": 12, "lies": 10}, {"id": "coxvxJ862mY", "title": "Who can trust the Traveller? - Blood on the Clocktower in Minecraft", "winner": "Evil", "claims": 11, "lies": 6}, {"id": "DfPtc23EtGA", "title": "Two Minds, One Body - Blood on the Clocktower in Minecraft", "winner": "Good", "claims": 19, "lies": 8}, {"id": "nZ4CPKMrCnY", "title": "Rock, Paper, Scissors, Psychopath? We choose our own roles! | Blood on the Clocktower Bonus!", "winner": "", "claims": 21, "lies": 8}, {"id": "s_xs104YGo0", "title": "Trick or Treat? - Blood on the Clocktower in Minecraft | Halloween Special", "winner": "Good", "claims": 19, "lies": 4}, {"id": "FVhHMIRhkmY", "title": "Is this the worst Assassin? - Blood on the Clocktower in Minecraft", "winner": "", "claims": 6, "lies": 1}, {"id": "sByVy0JFi90", "title": "Back to basics with our noob players - Blood on the Clocktower in Minecraft", "winner": "Good", "claims": 18, "lies": 8}, {"id": "IUO3Xz1kNkc", "title": "4 evil vs 3 good when we choose our own roles | Blood on the Clocktower Bonus!", "winner": "Evil", "claims": 17, "lies": 5}];
+const EXPLORER = "http://localhost:8501";
+
+// ── wins scoreboard ────────────────────────────────────────────────────────────
+(function () {
+  const w = DATA.wins || {good: 0, evil: 0};
+  const board = document.getElementById("wins-board");
+  if (board) {
+    board.innerHTML =
+      `<div class="wins-side wins-good">
+         <div class="wins-label">Good</div>
+         <div class="wins-num">${w.good}</div>
+         <div class="wins-sub">wins</div>
+       </div>
+       <div class="wins-vs">VS</div>
+       <div class="wins-side wins-evil">
+         <div class="wins-label">Evil</div>
+         <div class="wins-num">${w.evil}</div>
+         <div class="wins-sub">wins</div>
+       </div>`;
+  }
+  const total = (w.good + w.evil) || 1;
+  const goodPct = (w.good / total * 100).toFixed(2);
+  const evilPct = (w.evil / total * 100).toFixed(2);
+  const bg = document.getElementById("wbar-good");
+  const be = document.getElementById("wbar-evil");
+  if (bg) bg.style.width = goodPct + "%";
+  if (be) be.style.width = evilPct + "%";
+})();
+
+// ── stat bubbles ──────────────────────────────────────────────────────────────
+(function () {
+  const s = DATA.summary;
+  const lie_rate = s.claims > 0 ? (s.lies / s.claims * 100).toFixed(1) + "%" : "—";
+  const items = [
+    [s.games,   "Games"],
+    [s.players, "Players"],
+    [s.claims,  "Role Claims"],
+    [s.lies,    "Lies Told"],
+    [s.true,    "True Claims"],
+    [lie_rate,  "Lie Rate"],
+  ];
+  const row = document.getElementById("stat-row");
+  items.forEach(([num, lbl]) => {
+    row.innerHTML +=
+      `<div class="stat-bubble"><div class="num">${num}</div><div class="lbl">${lbl}</div></div>`;
+  });
+})();
+
+// ── superlatives ──────────────────────────────────────────────────────────────
+(function () {
+  const sup = DATA.superlatives;
+  const cards = [
+    {
+      key: "most_evil", icon: "😈", label: "Most Often Evil",
+      name:   s => s.player_name,
+      detail: s => `Evil ${s.evil_g}/${s.games} games (${(s.evil_rate*100).toFixed(0)}%)`,
+      bg: "#2a1215",
+    },
+    {
+      key: "most_good", icon: "😇", label: "Most Often Good",
+      name:   s => s.player_name,
+      detail: s => `Good ${s.good_g}/${s.games} games (${(s.good_rate*100).toFixed(0)}%)`,
+      bg: "#0e1f2a",
+    },
+    {
+      key: "biggest_liar", icon: "🤥", label: "Biggest Liar",
+      name:   s => s.player_name,
+      detail: s => `${s.lies} lies · ${(s.lie_rate*100).toFixed(0)}% lie rate`,
+      bg: "#2a1215",
+    },
+    {
+      key: "most_honest", icon: "🌟", label: "Most Honest",
+      name:   s => s.player_name,
+      detail: s => `${s.true_} true · ${(s.lie_rate*100).toFixed(0)}% lie rate`,
+      bg: "#0e2a1f",
+    },
+    {
+      key: "traitor", icon: "🗡️", label: "Lied to Their Town",
+      name:   s => s.player_name,
+      detail: s => `${s.good_lies} lies while playing Good`,
+      bg: "#2a200e",
+    },
+    {
+      key: "most_games", icon: "🎮", label: "Most Games Played",
+      name:   s => s.player_name,
+      detail: s => `${s.games} appearances`,
+      bg: "#1a1a2e",
+    },
+    {
+      key: "most_talkative", icon: "🗣️", label: "Most Talkative",
+      name:   s => s.player_name,
+      detail: s => `~${Math.round(s.wpg).toLocaleString()} words/game avg`,
+      bg: "#1a2a1a",
+    },
+  ];
+
+  const grid = document.getElementById("sup-grid");
+  cards.forEach(c => {
+    const data = sup[c.key];
+    const html = data
+      ? `<div class="icon">${c.icon}</div>
+         <div class="label">${c.label}</div>
+         <div class="player">${c.name(data)}</div>
+         <div class="detail">${c.detail(data)}</div>`
+      : `<div class="icon">${c.icon}</div>
+         <div class="label">${c.label}</div>
+         <div class="player" style="color:var(--muted)">—</div>`;
+    grid.innerHTML +=
+      `<div class="sup-card" style="border-color:${c.bg === "#2a1215" ? "#5a1f1f" :
+        c.bg === "#0e1f2a" ? "#1e3a5a" : "var(--border)"};background:${c.bg}">${html}</div>`;
+  });
+})();
+
+// ── doughnut chart ────────────────────────────────────────────────────────────
+(function () {
+  const s = DATA.summary;
+  new Chart(document.getElementById("donut-chart"), {
+    type: "doughnut",
+    data: {
+      labels: ["LIE", "TRUE", "UNVERIFIED", "HONEST MISTAKE"],
+      datasets: [{
+        data: [s.lies, s.true, s.unverified, s.hm],
+        backgroundColor: ["#dc2626", "#16a34a", "#4b5563", "#d97706"],
+        borderColor: "#161625",
+        borderWidth: 3,
+        hoverOffset: 8,
+      }],
+    },
+    options: {
+      plugins: {
+        legend: {
+          position: "bottom",
+          labels: {
+            color: "#8892a4",
+            font: { size: 11 },
+            padding: 12,
+          },
+        },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.label}: ${ctx.parsed} (${(ctx.parsed/(s.claims||1)*100).toFixed(1)}%)`,
+          },
+        },
+      },
+      cutout: "68%",
+    },
+  });
+})();
+
+// ── horizontal bar chart (top liars) ──────────────────────────────────────────
+(function () {
+  const liars = DATA.top_liars;
+  if (!liars.length) return;
+  const labels = liars.map(x => x.name);
+  const lies   = liars.map(x => x.lies);
+  const rates  = liars.map(x => x.lie_rate);
+  // Color each bar by lie_rate: low = amber, high = red
+  const colors = rates.map(r => {
+    const t = Math.min(r, 1);
+    const red = Math.round(220 + t * (220 - 220));
+    return `rgba(220, ${Math.round(38 + (1-t)*140)}, ${Math.round(38 + (1-t)*100)}, 0.85)`;
+  });
+
+  new Chart(document.getElementById("bar-chart"), {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        label: "Lies told",
+        data: lies,
+        backgroundColor: colors,
+        borderRadius: 6,
+      }],
+    },
+    options: {
+      indexAxis: "y",
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.parsed.x} lies · ${(rates[ctx.dataIndex]*100).toFixed(0)}% lie rate`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          grid:  { color: "#2a2a45" },
+          ticks: { color: "#8892a4", font: { size: 11 } },
+        },
+        y: {
+          grid:  { display: false },
+          ticks: { color: "#e2e8f0", font: { size: 12 } },
+        },
+      },
+    },
+  });
+})();
+
+// ── most-faked roles table ────────────────────────────────────────────────────
+(function () {
+  const tbody = document.getElementById("fake-roles-body");
+  const rows  = DATA.fake_roles || [];
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="4" class="empty">No lie data yet.</td></tr>`;
+    return;
+  }
+  rows.forEach(r => {
+    tbody.innerHTML +=
+      `<tr>
+        <td style="font-weight:600">${r.role}</td>
+        <td><span class="team-${r.team.toLowerCase()}">${r.team}</span></td>
+        <td>${r.times_faked}</td>
+        <td>${r.unique_liars}</td>
+      </tr>`;
+  });
+})();
+
+// ── roles tables (split Evil / Good) ──────────────────────────────────────────
+(function () {
+  function renderRoles(roles, tbodyId, barColor) {
+    const tbody = document.getElementById(tbodyId);
+    if (!roles.length) {
+      tbody.innerHTML = `<tr><td colspan="4" class="empty" style="padding:20px">—</td></tr>`;
+      return;
+    }
+    roles.forEach(r => {
+      const pct = (r.lie_rate * 100).toFixed(0);
+      tbody.innerHTML +=
+        `<tr>
+          <td style="font-weight:600">${r.role}</td>
+          <td>${r.claims}</td>
+          <td>${r.lies}</td>
+          <td>
+            <div class="rate-bar-wrap">
+              <div class="rate-bar">
+                <div class="rate-bar-fill" style="width:${pct}%;background:${barColor}"></div>
+              </div>
+              <span style="font-size:.8rem;min-width:34px">${pct}%</span>
+            </div>
+          </td>
+        </tr>`;
+    });
+  }
+
+  const evilRoles = DATA.roles.filter(r => r.team === "Evil");
+  const goodRoles = DATA.roles.filter(r => r.team === "Good");
+  renderRoles(evilRoles, "evil-roles-body", "#dc2626");
+  renderRoles(goodRoles, "good-roles-body", "#2563eb");
+})();
+
+// ── games grid ────────────────────────────────────────────────────────────────
+(function () {
+  const grid = document.getElementById("games-grid");
+  if (!GAMES.length) {
+    grid.innerHTML = `<div class="empty">No games analyzed yet.</div>`;
+    return;
+  }
+  GAMES.forEach(g => {
+    const wCls   = g.winner === "Evil" ? "badge-evil" : g.winner === "Good" ? "badge-good" : "badge-none";
+    const wLabel = g.winner || "Unknown";
+    const ytUrl  = `https://www.youtube.com/watch?v=${g.id}`;
+    const lieRate = g.claims > 0 ? (g.lies / g.claims * 100).toFixed(0) + "% lie rate" : "";
+    grid.innerHTML +=
+      `<div class="game-card">
+        <div class="game-title">${g.title}</div>
+        <div class="game-meta">
+          <span class="badge ${wCls}">${wLabel} wins</span>
+          <span class="game-stats">${g.lies} lie${g.lies!==1?"s":""} · ${g.claims} claim${g.claims!==1?"s":""}</span>
+        </div>
+        <a class="game-link" href="${ytUrl}" target="_blank">▶ Watch on YouTube →</a>
+      </div>`;
+  });
+})();
+</script>
+</body>
+</html>
