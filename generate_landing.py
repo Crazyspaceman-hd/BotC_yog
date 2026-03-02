@@ -1606,7 +1606,7 @@ function toggleTheme() {{
     cards.forEach(c => {{
       let data = sup[c.key];
       // Suppress Goblin in role-based superlatives when goblin mode is off
-      if (!_goblinMode && data && data.role === 'Goblin' &&
+      if (!_goblinMode && data && data.role === 'goblin' &&
           (c.key === 'most_faked_role' || c.key === 'best_evil_role')) {{
         data = null;
       }}
@@ -1719,7 +1719,7 @@ function toggleTheme() {{
   const tbody = document.getElementById("fake-roles-body");
 
   function render() {{
-    const rows = (DATA.fake_roles || []).filter(r => _goblinMode || r.role !== 'Goblin');
+    const rows = (DATA.fake_roles || []).filter(r => _goblinMode || r.role !== 'goblin');
     if (!rows.length) {{
       tbody.innerHTML = `<tr><td colspan="4" class="empty">No lie data yet.</td></tr>`;
       return;
@@ -1795,7 +1795,7 @@ function toggleTheme() {{
   renderRoles(goodRoles, "good-roles-body", "#2563eb");
 
   function renderEvil() {{
-    const evilRoles = DATA.roles.filter(r => r.team === "Evil" && (_goblinMode || r.role !== 'Goblin'));
+    const evilRoles = DATA.roles.filter(r => r.team === "Evil" && (_goblinMode || r.role !== 'goblin'));
     renderRoles(evilRoles, "evil-roles-body", "#dc2626");
   }}
   _reRenderEvilRoles = renderEvil;
