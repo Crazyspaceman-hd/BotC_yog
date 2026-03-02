@@ -251,7 +251,8 @@
       "url": "https://www.youtube.com/watch?v=d2M-N5iABRo",
       "status": "pending",
       "members_only": true,
-      "members": true
+      "members": true,
+      "blind": true
     },
     {
       "id": "uiL6EjemKD0",
@@ -278,7 +279,8 @@
       "url": "https://www.youtube.com/watch?v=ggM9BH__xtU",
       "status": "analyzed",
       "winner": null,
-      "members": false
+      "members": false,
+      "blind": true
     },
     {
       "id": "GopTiY65CC0",
@@ -467,7 +469,8 @@
       "url": "https://www.youtube.com/watch?v=nPAdvl7pySg",
       "status": "analyzed",
       "winner": "Good",
-      "members": false
+      "members": false,
+      "blind": true
     },
     {
       "id": "DbF9CPOueTI",

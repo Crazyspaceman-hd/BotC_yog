@@ -29,10 +29,26 @@ import json
 import re
 from pathlib import Path
 
-from pipeline_utils import parse_rttm
+from pipeline_utils import parse_rttm, load_player_aliases, resolve_player_name
 
 INTRO_CUTOFF   = 300.0        # seconds — used to build the initial roster
 STORYTELLER_ID = "speaker_0"  # diarization always assigns lead voice to spk_0
+
+# ── Blind-game set (loaded once at startup) ───────────────────────────────────
+def _load_blind_vids() -> set[str]:
+    """Return set of video IDs marked as 'blind' in playlist.json."""
+    p = Path("playlist.json")
+    if not p.exists():
+        return set()
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        entries = data if isinstance(data, list) else data.get("entries", [])
+        return {e["id"] for e in entries if e.get("blind")}
+    except Exception:
+        return set()
+
+_BLIND_VIDS: set[str] = _load_blind_vids()
+_PLAYER_ALIASES: dict[str, str] = load_player_aliases()
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -286,14 +302,16 @@ def load_intro_roster(out_dir: Path) -> dict[str, dict]:
 
     result: dict[str, dict] = {}
     for p in data.get("players", []):
-        name = (p.get("name") or "").strip()
-        if name:
-            result[name.lower()] = {
-                "name":          name,
-                "believed_role": p.get("believed_role", "unknown").lower(),
-                "actual_role":   p.get("actual_role",   "unknown").lower(),
-                "frame_time":    p.get("frame_time", 0.0),
-            }
+        raw_name = (p.get("name") or "").strip()
+        if not raw_name:
+            continue
+        name = resolve_player_name(raw_name, _PLAYER_ALIASES)
+        result[name.lower()] = {
+            "name":          name,
+            "believed_role": p.get("believed_role", "unknown").lower(),
+            "actual_role":   p.get("actual_role",   "unknown").lower(),
+            "frame_time":    p.get("frame_time", 0.0),
+        }
     return result
 
 
@@ -647,6 +665,19 @@ def main(video_id: str = "lF96Jd3Eaeg") -> None:
     rttm_turns = parse_rttm(rttm) if rttm.exists() else []
     print(f"Loaded {len(segments)} segments\n")
 
+    # ── Blind game: skip lie detection entirely ────────────────────────────────
+    if video_id in _BLIND_VIDS:
+        print("[blind game] Players didn't know their roles — skipping lie detection.")
+        lie_csv.parent.mkdir(parents=True, exist_ok=True)
+        fieldnames = [
+            "timestamp", "speaker", "player_name",
+            "actual_role", "believed_role", "claimed_role", "verdict", "text",
+        ]
+        with lie_csv.open("w", newline="", encoding="utf-8") as f:
+            csv.DictWriter(f, fieldnames=fieldnames).writeheader()
+        print(f"Wrote empty lie_analysis.csv -> {lie_csv}")
+        return
+
     # ── A: build transcript-based roster ──────────────────────────────────────
     print("Building intro roster from transcript ...")
     roster = build_roster(segments, players, roles, rttm_turns)
@@ -684,9 +715,10 @@ def main(video_id: str = "lF96Jd3Eaeg") -> None:
         overrides = json.loads(overrides_file.read_text(encoding="utf-8"))
         n_applied = 0
         for spk, info in overrides.items():
-            name = info.get("name", "")
-            if not name or name == spk:
+            raw_name = info.get("name", "")
+            if not raw_name or raw_name == spk:
                 continue
+            name = resolve_player_name(raw_name, _PLAYER_ALIASES)
             roster[spk] = {
                 "name":               name,
                 "believed_role":      (info.get("believed_role") or "unknown").lower(),

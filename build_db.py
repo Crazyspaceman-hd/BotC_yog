@@ -14,6 +14,10 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+from pipeline_utils import load_player_aliases, resolve_player_name
+
+_PLAYER_ALIASES: dict[str, str] = load_player_aliases()
+
 # ── Evil-role lookup (mirrors explore_public.py) ──────────────────────────────
 _EVIL_ROLES = {
     # Demons
@@ -164,7 +168,7 @@ def build(db_path: Path) -> None:
                         vid,
                         r.get("timestamp", ""),
                         r.get("speaker", ""),
-                        r.get("player_name", ""),
+                        resolve_player_name(r.get("player_name", ""), _PLAYER_ALIASES),
                         team_for(r.get("actual_role", "")),
                         r.get("actual_role", ""),
                         r.get("believed_role", ""),
@@ -213,7 +217,7 @@ def build(db_path: Path) -> None:
                     [
                         (
                             vid,
-                            p.get("name", ""),
+                            resolve_player_name(p.get("name", ""), _PLAYER_ALIASES),
                             p.get("actual_role", ""),
                             p.get("believed_role", ""),
                             p.get("frame_time", 0.0),
@@ -236,7 +240,9 @@ def build(db_path: Path) -> None:
             overrides = json.loads(overrides_json.read_text(encoding="utf-8"))
             con.execute("DELETE FROM speaker_map WHERE video_id = ?", (vid,))
             rows = [
-                (vid, spk, ov.get("name", ""), ov.get("actual_role", ""), ov.get("believed_role", ""))
+                (vid, spk,
+                 resolve_player_name(ov.get("name", ""), _PLAYER_ALIASES),
+                 ov.get("actual_role", ""), ov.get("believed_role", ""))
                 for spk, ov in overrides.items()
                 if ov.get("name")   # only store entries with a name assigned
             ]

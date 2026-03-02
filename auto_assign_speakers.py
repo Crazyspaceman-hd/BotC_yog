@@ -24,11 +24,32 @@ import re
 from difflib import SequenceMatcher
 from pathlib import Path
 
+from pipeline_utils import load_player_aliases, resolve_player_name
+
 # ─── Paths ────────────────────────────────────────────────────────────────────
 
 OUTPUTS_DIR = Path("outputs")
 PLAYLIST    = Path("playlist.json")
 ROLES_TXT   = Path("roles.txt")
+
+# ─── Player aliases ───────────────────────────────────────────────────────────
+
+_PLAYER_ALIASES: dict[str, str] = load_player_aliases()
+
+# ─── Blind-game set ───────────────────────────────────────────────────────────
+
+def _load_blind_vids() -> set[str]:
+    """Return set of video IDs marked as blind in playlist.json."""
+    if not PLAYLIST.exists():
+        return set()
+    try:
+        data = json.loads(PLAYLIST.read_text(encoding="utf-8"))
+        entries = data if isinstance(data, list) else data.get("entries", [])
+        return {e["id"] for e in entries if e.get("blind")}
+    except Exception:
+        return set()
+
+_BLIND_VIDS: set[str] = _load_blind_vids()
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -223,7 +244,10 @@ def _match_claim_to_player(
 
     if len(matches) > 1:
         names = [m[0]["name"] for m in matches]
-        return None, f"Claimed role '{canonical}' is ambiguous: matches {names}", 0.0
+        return None, (
+            f"Role '{canonical}' is held by {len(names)} players ({names}) "
+            f"— cannot determine from claim alone; use fix_rosters.py"
+        ), 0.0
 
     # Check if the role belongs to an already-assigned player (lying / diarization split)
     for p in all_players:
@@ -270,7 +294,12 @@ def _load_intro_roster(vid: str) -> list[dict]:
     f = OUTPUTS_DIR / vid / "intro_roster.json"
     if f.exists():
         try:
-            return json.loads(f.read_text(encoding="utf-8")).get("players", [])
+            players = json.loads(f.read_text(encoding="utf-8")).get("players", [])
+            # Resolve player name aliases (e.g. Mscupcakes -> Sophie)
+            for p in players:
+                if p.get("name"):
+                    p["name"] = resolve_player_name(p["name"], _PLAYER_ALIASES)
+            return players
         except Exception:
             pass
     return []
@@ -378,7 +407,8 @@ def analyse_video(
             }
 
         # 1b. Role declaration — only if not already identified as Storyteller
-        if result is None:
+        #     Skipped for blind games (players don't know their own roles)
+        if result is None and vid not in _BLIND_VIDS:
             claims = _extract_role_claims(lines)
             # Deduplicate by role
             seen_claims: dict[str, tuple[str, float, str]] = {}
@@ -437,10 +467,41 @@ def analyse_video(
 
     eliminated: list[dict] = []
 
+    # Detect silent players: players in intro_roster with NO segments at all
+    # (they appear in the game roster but never spoke on the recording)
+    all_speaker_ids = set(transcripts.keys())
+    silent_players: list[dict] = []
+    if len(remaining_unassigned) > len(remaining_unlinked):
+        # More players than speakers → at least one player is silent
+        # Identify players whose name doesn't appear in any override (they have
+        # no speaker ID at all, not even an unlinked one)
+        n_silent = len(remaining_unassigned) - len(remaining_unlinked)
+        # Best guess: report the excess players as potentially silent
+        # (we can't know FOR SURE which player is silent without more info)
+        silent_players = remaining_unassigned[len(remaining_unlinked):][:n_silent]
+        for p in silent_players:
+            skipped.append({
+                "speaker_id": "__none__",
+                "reason":     (
+                    f"Likely non-speaking — no speaker slot remains for "
+                    f"{p['name']} ({p.get('actual_role', '?')}). "
+                    f"If this player did not speak in this game, no action needed."
+                ),
+                "sample_lines": [],
+                "n_lines":      0,
+                "first_t":      0.0,
+            })
+        # Adjust remaining_unassigned for elimination purposes
+        remaining_unassigned = remaining_unassigned[:len(remaining_unlinked)]
+
     if len(remaining_unlinked) == 1 and len(remaining_unassigned) == 1:
         spk    = remaining_unlinked[0]
         player = remaining_unassigned[0]
         lines  = transcripts[spk]
+        elim_note = ""
+        if silent_players:
+            elim_note = (f" (after excluding {len(silent_players)} likely-silent "
+                         f"player(s): {[p['name'] for p in silent_players]})")
         eliminated.append({
             "speaker_id":             spk,
             "proposed_name":          player["name"],
@@ -450,7 +511,7 @@ def analyse_video(
             "evidence":               [
                 f"Process of elimination: only remaining unlinked speaker "
                 f"and only remaining unassigned player ({player['name']}, "
-                f"{player.get('actual_role', '?')})",
+                f"{player.get('actual_role', '?')}){elim_note}",
             ],
         })
         # Move from skipped to eliminated

@@ -28,6 +28,9 @@ import pandas as pd
 import streamlit as st
 
 from botc_ui import _EVIL_ROLES
+from pipeline_utils import load_player_aliases, resolve_player_name
+
+_PLAYER_ALIASES: dict[str, str] = load_player_aliases()
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
 
@@ -103,11 +106,17 @@ st.set_page_config(
 def load_players() -> list[str]:
     if not PLAYERS_TXT.exists():
         return []
-    return [
-        ln.strip()
-        for ln in PLAYERS_TXT.read_text(encoding="utf-8").splitlines()
-        if ln.strip()
-    ]
+    seen: set[str] = set()
+    result: list[str] = []
+    for ln in PLAYERS_TXT.read_text(encoding="utf-8").splitlines():
+        name = ln.strip()
+        if not name:
+            continue
+        canonical = resolve_player_name(name, _PLAYER_ALIASES)
+        if canonical not in seen:
+            seen.add(canonical)
+            result.append(canonical)
+    return result
 
 
 @st.cache_data
@@ -600,6 +609,16 @@ if item["kind"] == "unlinked_batch":
     )
     st.markdown(f"### [{title}](https://www.youtube.com/watch?v={vid})")
     st.caption(f"Video ID: `{vid}`")
+
+    # Blind-game warning
+    blind_vids = {e["id"] for e in playlist if e.get("blind")}
+    if vid in blind_vids:
+        st.warning(
+            "**BLIND GAME** — players didn't know their roles during this game. "
+            "Role auto-fill is not available, but speaker → player assignment "
+            "via Storyteller detection and manual linking still works.",
+            icon="🙈",
+        )
 
     # Context bar: intro roster summary
     if known_players:
