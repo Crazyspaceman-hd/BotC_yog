@@ -377,6 +377,8 @@ _HTML = """\
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <title>🏰 BotC · Yogscast Lie Tracker</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <style>
@@ -798,9 +800,202 @@ footer a {{ color: var(--gold); }}
   background: linear-gradient(90deg, #dc2626, #b91c1c);
   transition: width .8s cubic-bezier(.4,0,.2,1);
 }}
+
+/* ── MINECRAFT THEME ─────────────────────────────────────────────────────── */
+body.mc {{
+  --bg:       #1a1a1a;
+  --surface:  #3c3c3c;
+  --surface2: #2b2b2b;
+  --border:   #1a1a1a;
+  --text:     #ffffff;
+  --muted:    #aaaaaa;
+  --evil:     #ff5555;
+  --evil-dim: #5a0000;
+  --good:     #55ff55;
+  --good-dim: #005500;
+  --gold:     #ffaa00;
+  --green:    #55ff55;
+  --radius:   0px;
+  background-color: #6b6b6b;
+  background-image:
+    repeating-linear-gradient(0deg,  transparent, transparent 15px, rgba(0,0,0,.28) 15px, rgba(0,0,0,.28) 16px),
+    repeating-linear-gradient(90deg, transparent, transparent 15px, rgba(0,0,0,.28) 15px, rgba(0,0,0,.28) 16px);
+  font-family: 'Press Start 2P', monospace;
+  image-rendering: pixelated;
+}}
+body.mc a {{ color: #ffaa00; }}
+body.mc header {{
+  background: #1d1d1d;
+  border-bottom: none;
+  padding-bottom: 52px;
+  position: relative;
+}}
+body.mc header::after {{
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 14px;
+  background: linear-gradient(180deg, #5d9734 0%, #5d9734 50%, #876440 50%);
+}}
+body.mc .hero-title {{
+  font-family: 'Press Start 2P', monospace;
+  background: transparent !important;
+  -webkit-background-clip: unset !important;
+  background-clip: unset !important;
+  -webkit-text-fill-color: #fcfc00;
+  color: #fcfc00;
+  text-shadow: 4px 4px 0 #5a4a00;
+  font-size: clamp(1rem, 2.5vw, 1.8rem);
+  letter-spacing: 0.04em;
+}}
+body.mc .hero-sub {{
+  font-family: 'Press Start 2P', monospace;
+  color: #aaaaaa;
+  font-size: 0.55rem;
+  letter-spacing: 0.08em;
+}}
+body.mc .wins-board {{ gap: 20px; }}
+body.mc .wins-label {{ font-family: 'Press Start 2P', monospace; font-size: 0.5rem; letter-spacing: 0.1em; }}
+body.mc .wins-num   {{ font-family: 'Press Start 2P', monospace !important; font-size: clamp(2rem, 5vw, 3.5rem) !important; }}
+body.mc .wins-sub   {{ font-family: 'Press Start 2P', monospace; font-size: 0.45rem; letter-spacing: 0.08em; }}
+body.mc .wins-vs    {{ font-family: 'Press Start 2P', monospace; font-size: 0.9rem; }}
+body.mc .wins-bar-wrap {{ border-radius: 0; height: 10px; }}
+body.mc .wins-bar-good {{ background: linear-gradient(90deg, #33aa33, #55ff55); }}
+body.mc .wins-bar-evil {{ background: linear-gradient(90deg, #aa3333, #ff5555); }}
+body.mc .stat-bubble {{
+  background: #3c3c3c;
+  border: 2px solid #1a1a1a;
+  border-radius: 0;
+  box-shadow: inset 1px 1px 0 #6a6a6a, inset -1px -1px 0 #2a2a2a;
+}}
+body.mc .stat-bubble .num {{ font-family: 'Press Start 2P', monospace; font-size: 1.1rem; color: #ffaa00; }}
+body.mc .stat-bubble .lbl {{ font-family: 'Press Start 2P', monospace; font-size: 0.45rem; letter-spacing: .04em; }}
+body.mc .btn-explore {{
+  background: #7f7f7f !important;
+  border-radius: 0 !important;
+  box-shadow: inset -4px -4px 0 #2d2d2d, inset 4px 4px 0 #cfcfcf !important;
+  text-shadow: 2px 2px #3f3f3f;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 0.6rem;
+  letter-spacing: 0.08em;
+  transition: background .1s;
+}}
+body.mc .btn-explore:hover {{
+  background: #8888cc !important;
+  box-shadow: inset -4px -4px 0 #2a2a7a, inset 4px 4px 0 #bbbbff !important;
+  transform: none;
+}}
+body.mc .section-title {{ font-family: 'Press Start 2P', monospace; color: #ffaa00; font-size: 0.72rem; }}
+body.mc .section-title::after {{ background: #5a5a5a; height: 2px; }}
+body.mc .sup-card {{
+  background: #3c3c3c !important;
+  border: 2px solid #1a1a1a !important;
+  border-radius: 0;
+  box-shadow: inset 1px 1px 0 #5a5a5a, inset -1px -1px 0 #2a2a2a;
+}}
+body.mc .sup-card:hover {{ transform: none; box-shadow: inset 1px 1px 0 #5a5a5a, inset -1px -1px 0 #2a2a2a; }}
+body.mc .sup-card .icon  {{ font-size: 1.4rem; }}
+body.mc .sup-card .label {{ font-family: 'Press Start 2P', monospace; font-size: 0.45rem; letter-spacing: 0.05em; }}
+body.mc .sup-card .player {{ font-family: 'Press Start 2P', monospace; font-size: 0.7rem; color: #ffaa00; }}
+body.mc .sup-card .detail {{ font-family: 'Press Start 2P', monospace; font-size: 0.5rem; }}
+body.mc .chart-card {{
+  background: #3c3c3c;
+  border: 2px solid #1a1a1a;
+  border-radius: 0;
+  box-shadow: inset 1px 1px 0 #5a5a5a, inset -1px -1px 0 #2a2a2a;
+}}
+body.mc .chart-card h3 {{ font-family: 'Press Start 2P', monospace; font-size: 0.55rem; color: #aaaaaa; letter-spacing: 0.05em; }}
+body.mc .table-card {{
+  border: 2px solid #1a1a1a;
+  border-radius: 0;
+  box-shadow: inset 1px 1px 0 #5a5a5a;
+}}
+body.mc thead th {{
+  background: #2b2b2b;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 0.45rem;
+  color: #aaaaaa;
+  letter-spacing: 0.04em;
+  border-bottom: 2px solid #1a1a1a;
+}}
+body.mc tbody tr {{ border-bottom-color: #2b2b2b; }}
+body.mc tbody tr:hover {{ background: #4a4a4a; }}
+body.mc td {{ font-family: 'Press Start 2P', monospace; font-size: 0.58rem; line-height: 1.8; }}
+body.mc .team-evil {{ color: #ff8888; font-family: 'Press Start 2P', monospace; font-size: 0.48rem; }}
+body.mc .team-good {{ color: #88ff88; font-family: 'Press Start 2P', monospace; font-size: 0.48rem; }}
+body.mc .rate-bar {{ border-radius: 0; background: #1a1a1a; }}
+body.mc .rate-bar-fill {{ border-radius: 0; }}
+body.mc .badge {{ border-radius: 0; font-family: 'Press Start 2P', monospace; font-size: 0.45rem; }}
+body.mc .badge-evil {{ background: #5a0000; color: #ff8888; }}
+body.mc .badge-good {{ background: #005500; color: #88ff88; }}
+body.mc .roles-evil-hdr {{ background: #3d0000 !important; color: #ff8888 !important; font-family: 'Press Start 2P', monospace; font-size: 0.6rem; }}
+body.mc .roles-good-hdr {{ background: #003d00 !important; color: #88ff88 !important; font-family: 'Press Start 2P', monospace; font-size: 0.6rem; }}
+body.mc .roles-faked-hdr {{ background: #1a0030 !important; color: #cc88ff !important; font-family: 'Press Start 2P', monospace; font-size: 0.55rem; }}
+body.mc .game-card {{
+  background: #3c3c3c;
+  border: 2px solid #1a1a1a;
+  border-radius: 0;
+  box-shadow: inset 1px 1px 0 #5a5a5a, inset -1px -1px 0 #2a2a2a;
+}}
+body.mc .game-card:hover {{ transform: none; box-shadow: inset 1px 1px 0 #7a7a7a; }}
+body.mc .game-title {{ font-family: 'Press Start 2P', monospace; font-size: 0.6rem; line-height: 1.8; }}
+body.mc .game-stats {{ font-family: 'Press Start 2P', monospace; font-size: 0.5rem; }}
+body.mc .game-link  {{ font-family: 'Press Start 2P', monospace; font-size: 0.5rem; color: #ffaa00; }}
+body.mc footer {{
+  background: #2b2b2b;
+  border-top: 2px solid #1a1a1a;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 0.5rem;
+  line-height: 2;
+}}
+body.mc footer a {{ color: #ffaa00; }}
+
+/* ── theme toggle button ──────────────────────────────────────────────────── */
+#theme-toggle {{
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 9999;
+  background: #312a5a;
+  border: 1px solid #2a2a45;
+  color: #e2e8f0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 8px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background .15s, transform .1s;
+  letter-spacing: .02em;
+  line-height: 1;
+}}
+#theme-toggle:hover {{ background: #4a3a7a; transform: translateY(-1px); }}
+body.mc #theme-toggle {{
+  background: #7f7f7f;
+  border: none;
+  box-shadow: inset -3px -3px 0 #2d2d2d, inset 3px 3px 0 #cfcfcf;
+  color: #fff;
+  text-shadow: 2px 2px #3f3f3f;
+  font-family: 'Press Start 2P', monospace;
+  border-radius: 0;
+  font-size: 0.55rem;
+  padding: 10px 14px;
+  letter-spacing: 0.05em;
+  transition: background .1s;
+  transform: none;
+}}
+body.mc #theme-toggle:hover {{
+  background: #8888cc;
+  box-shadow: inset -3px -3px 0 #2a2a7a, inset 3px 3px 0 #bbbbff;
+  transform: none;
+}}
+body.mc #theme-toggle:active {{
+  box-shadow: inset 3px 3px 0 #2d2d2d, inset -3px -3px 0 #cfcfcf;
+}}
 </style>
 </head>
 <body>
+
+<button id="theme-toggle" onclick="toggleTheme()">⛏ MC Mode</button>
 
 <header>
   <div class="hero-title">🏰 Blood on the Clocktower</div>
@@ -844,7 +1039,7 @@ footer a {{ color: var(--gold); }}
     <div class="section-title"><span>🎭</span> Role Breakdown <span style="font-size:.8rem;font-weight:400;margin-left:4px;">(min 3 claims)</span></div>
 
     <div class="table-card" style="margin-bottom:20px">
-      <div class="roles-team-hdr" style="background:#1a1430;color:#c4b5fd;border-bottom:1px solid var(--border)">🎭 Roles Most Often Faked <span style="font-size:.78rem;font-weight:400;opacity:.7">(min 2 lies · sorted by times faked)</span></div>
+      <div class="roles-team-hdr roles-faked-hdr" style="background:#1a1430;color:#c4b5fd;border-bottom:1px solid var(--border)">🎭 Roles Most Often Faked <span style="font-size:.78rem;font-weight:400;opacity:.7">(min 2 lies · sorted by times faked)</span></div>
       <table>
         <thead>
           <tr>
@@ -896,6 +1091,42 @@ footer a {{ color: var(--gold); }}
 const DATA   = {data_json};
 const GAMES  = {games_json};
 const EXPLORER = "{explorer_url}";
+
+// ── theme globals & helpers ───────────────────────────────────────────────────
+let _donutChart = null;
+let _barChart   = null;
+
+function updateChartTheme() {{
+  const isMC  = document.body.classList.contains('mc');
+  const gridC = isMC ? '#4a4a4a' : '#2a2a45';
+  const txX   = isMC ? '#aaaaaa' : '#8892a4';
+  const txY   = isMC ? '#ffffff' : '#e2e8f0';
+  const brdC  = isMC ? '#1a1a1a' : '#161625';
+  const legC  = isMC ? '#aaaaaa' : '#8892a4';
+  if (_donutChart) {{
+    _donutChart.data.datasets[0].borderColor = brdC;
+    _donutChart.options.plugins.legend.labels.color = legC;
+    _donutChart.update();
+  }}
+  if (_barChart) {{
+    _barChart.options.scales.x.grid.color  = gridC;
+    _barChart.options.scales.x.ticks.color = txX;
+    _barChart.options.scales.y.ticks.color = txY;
+    _barChart.update();
+  }}
+}}
+
+function toggleTheme() {{
+  const isMC = document.body.classList.toggle('mc');
+  localStorage.setItem('botc-theme', isMC ? 'mc' : 'classic');
+  const btn = document.getElementById('theme-toggle');
+  if (btn) btn.textContent = isMC ? '🌙 Classic' : '⛏ MC Mode';
+  const sub = document.querySelector('.hero-sub');
+  if (sub) sub.textContent = isMC
+    ? '⛏  Yogscast  ·  Auto-lie detection across every game  ⛏'
+    : 'Yogscast · Automated lie detection across every game';
+  updateChartTheme();
+}}
 
 // ── wins scoreboard ────────────────────────────────────────────────────────────
 (function () {{
@@ -1029,7 +1260,7 @@ const EXPLORER = "{explorer_url}";
 // ── doughnut chart ────────────────────────────────────────────────────────────
 (function () {{
   const s = DATA.summary;
-  new Chart(document.getElementById("donut-chart"), {{
+  _donutChart = new Chart(document.getElementById("donut-chart"), {{
     type: "doughnut",
     data: {{
       labels: ["LIE", "TRUE", "UNVERIFIED", "HONEST MISTAKE"],
@@ -1076,7 +1307,7 @@ const EXPLORER = "{explorer_url}";
     return `rgba(220, ${{Math.round(38 + (1-t)*140)}}, ${{Math.round(38 + (1-t)*100)}}, 0.85)`;
   }});
 
-  new Chart(document.getElementById("bar-chart"), {{
+  _barChart = new Chart(document.getElementById("bar-chart"), {{
     type: "bar",
     data: {{
       labels,
@@ -1185,6 +1416,18 @@ const EXPLORER = "{explorer_url}";
         <a class="game-link" href="${{ytUrl}}" target="_blank">▶ Watch on YouTube →</a>
       </div>`;
   }});
+}})();
+
+// ── restore saved theme ───────────────────────────────────────────────────────
+(function () {{
+  if (localStorage.getItem('botc-theme') === 'mc') {{
+    document.body.classList.add('mc');
+    const btn = document.getElementById('theme-toggle');
+    if (btn) btn.textContent = '🌙 Classic';
+    const sub = document.querySelector('.hero-sub');
+    if (sub) sub.textContent = '⛏  Yogscast  ·  Auto-lie detection across every game  ⛏';
+    updateChartTheme();
+  }}
 }})();
 </script>
 </body>
