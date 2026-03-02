@@ -36,7 +36,7 @@ def _load(db: Path) -> pd.DataFrame:
     con = sqlite3.connect(str(db))
     df = pd.read_sql_query(
         "SELECT l.video_id, v.title AS video_title, v.winner, "
-        "l.player_name, l.actual_role, l.verdict "
+        "l.player_name, l.actual_role, l.claimed_role, l.verdict "
         "FROM lies l JOIN videos v ON l.video_id = v.id",
         con,
     )
@@ -194,6 +194,29 @@ def _compute_stats(df: pd.DataFrame) -> dict:
         for _, row in top_liars_df.iterrows()
     ]
 
+    # ── roles most often faked (claimed_role on LIE rows) ────────────────────
+    fake_df = (
+        df[
+            (df["verdict"] == "LIE") &
+            df["claimed_role"].notna() &
+            (df["claimed_role"].str.lower() != "unknown")
+        ]
+        .groupby("claimed_role")
+        .agg(
+            times_faked  =("verdict",     "count"),
+            unique_liars =("player_name", "nunique"),
+        )
+        .reset_index()
+    )
+    fake_df["team"] = fake_df["claimed_role"].map(_team)
+    fake_df = fake_df[fake_df["times_faked"] >= 2].sort_values("times_faked", ascending=False)
+    fake_roles = fake_df.apply(lambda r: {
+        "role":         r["claimed_role"],
+        "team":         r["team"],
+        "times_faked":  int(r["times_faked"]),
+        "unique_liars": int(r["unique_liars"]),
+    }, axis=1).tolist()
+
     # ── role breakdown (sorted by lie rate, min 3 claims) ─────────────────────
     role_df = (
         df[df["actual_role"].notna() & (df["actual_role"].str.lower() != "unknown")]
@@ -267,9 +290,10 @@ def _compute_stats(df: pd.DataFrame) -> dict:
             "traitor":      _clean(traitor),
             "most_games":   _clean(most_games),
         },
-        "top_liars": top_liars,
-        "roles":     roles,
-        "players":   players,
+        "top_liars":   top_liars,
+        "fake_roles":  fake_roles,
+        "roles":       roles,
+        "players":     players,
     }
 
 
@@ -293,9 +317,10 @@ def _empty_stats() -> dict:
                          ["most_evil", "most_good", "biggest_liar",
                           "most_honest", "traitor", "most_games",
                           "most_talkative"]},
-        "top_liars": [],
-        "roles":     [],
-        "players":   [],
+        "top_liars":  [],
+        "fake_roles": [],
+        "roles":      [],
+        "players":    [],
     }
 
 
@@ -640,6 +665,26 @@ footer a {{ color: var(--gold); }}
   font-size: 1rem;
 }}
 
+/* ── roles split grid ── */
+.roles-row {{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 32px;
+}}
+@media (max-width: 700px) {{
+  .roles-row {{ grid-template-columns: 1fr; }}
+}}
+.roles-team-hdr {{
+  padding: 10px 14px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  border-bottom: 1px solid var(--border);
+}}
+.roles-evil-hdr {{ background: #200d0d; color: #fca5a5; }}
+.roles-good-hdr {{ background: #0a1120; color: #93c5fd; }}
+
 /* ── Evil vs Good wins scoreboard ── */
 .wins-board {{
   display: flex;
@@ -753,19 +798,37 @@ footer a {{ color: var(--gold); }}
 
   <section>
     <div class="section-title"><span>🎭</span> Role Breakdown <span style="font-size:.8rem;font-weight:400;margin-left:4px;">(min 3 claims)</span></div>
-    <div class="table-card">
-      <table id="roles-table">
+
+    <div class="table-card" style="margin-bottom:20px">
+      <div class="roles-team-hdr" style="background:#1a1430;color:#c4b5fd;border-bottom:1px solid var(--border)">🎭 Roles Most Often Faked <span style="font-size:.78rem;font-weight:400;opacity:.7">(min 2 lies · sorted by times faked)</span></div>
+      <table>
         <thead>
           <tr>
-            <th>Role</th>
+            <th>Claimed Role</th>
             <th>Team</th>
-            <th>Claims</th>
-            <th>Lies</th>
-            <th>Lie rate</th>
+            <th>Times Faked</th>
+            <th>Unique Liars</th>
           </tr>
         </thead>
-        <tbody id="roles-body"></tbody>
+        <tbody id="fake-roles-body"></tbody>
       </table>
+    </div>
+
+    <div class="roles-row">
+      <div class="table-card">
+        <div class="roles-team-hdr roles-evil-hdr">😈 Evil Roles</div>
+        <table>
+          <thead><tr><th>Role</th><th>Claims</th><th>Lies</th><th>Lie rate</th></tr></thead>
+          <tbody id="evil-roles-body"></tbody>
+        </table>
+      </div>
+      <div class="table-card">
+        <div class="roles-team-hdr roles-good-hdr">😇 Good Roles</div>
+        <table>
+          <thead><tr><th>Role</th><th>Claims</th><th>Lies</th><th>Lie rate</th></tr></thead>
+          <tbody id="good-roles-body"></tbody>
+        </table>
+      </div>
     </div>
   </section>
 
@@ -982,28 +1045,56 @@ const EXPLORER = "{explorer_url}";
   }});
 }})();
 
-// ── roles table ───────────────────────────────────────────────────────────────
+// ── most-faked roles table ────────────────────────────────────────────────────
 (function () {{
-  const tbody = document.getElementById("roles-body");
-  DATA.roles.forEach(r => {{
-    const pct = (r.lie_rate * 100).toFixed(0);
+  const tbody = document.getElementById("fake-roles-body");
+  const rows  = DATA.fake_roles || [];
+  if (!rows.length) {{
+    tbody.innerHTML = `<tr><td colspan="4" class="empty">No lie data yet.</td></tr>`;
+    return;
+  }}
+  rows.forEach(r => {{
     tbody.innerHTML +=
       `<tr>
         <td style="font-weight:600">${{r.role}}</td>
         <td><span class="team-${{r.team.toLowerCase()}}">${{r.team}}</span></td>
-        <td>${{r.claims}}</td>
-        <td>${{r.lies}}</td>
-        <td>
-          <div class="rate-bar-wrap">
-            <div class="rate-bar"><div class="rate-bar-fill" style="width:${{pct}}%"></div></div>
-            <span style="font-size:.8rem;min-width:34px">${{pct}}%</span>
-          </div>
-        </td>
+        <td>${{r.times_faked}}</td>
+        <td>${{r.unique_liars}}</td>
       </tr>`;
   }});
-  if (!DATA.roles.length) {{
-    tbody.innerHTML = `<tr><td colspan="5" class="empty">No role data yet.</td></tr>`;
+}})();
+
+// ── roles tables (split Evil / Good) ──────────────────────────────────────────
+(function () {{
+  function renderRoles(roles, tbodyId, barColor) {{
+    const tbody = document.getElementById(tbodyId);
+    if (!roles.length) {{
+      tbody.innerHTML = `<tr><td colspan="4" class="empty" style="padding:20px">—</td></tr>`;
+      return;
+    }}
+    roles.forEach(r => {{
+      const pct = (r.lie_rate * 100).toFixed(0);
+      tbody.innerHTML +=
+        `<tr>
+          <td style="font-weight:600">${{r.role}}</td>
+          <td>${{r.claims}}</td>
+          <td>${{r.lies}}</td>
+          <td>
+            <div class="rate-bar-wrap">
+              <div class="rate-bar">
+                <div class="rate-bar-fill" style="width:${{pct}}%;background:${{barColor}}"></div>
+              </div>
+              <span style="font-size:.8rem;min-width:34px">${{pct}}%</span>
+            </div>
+          </td>
+        </tr>`;
+    }});
   }}
+
+  const evilRoles = DATA.roles.filter(r => r.team === "Evil");
+  const goodRoles = DATA.roles.filter(r => r.team === "Good");
+  renderRoles(evilRoles, "evil-roles-body", "#dc2626");
+  renderRoles(goodRoles, "good-roles-body", "#2563eb");
 }})();
 
 // ── games grid ────────────────────────────────────────────────────────────────
