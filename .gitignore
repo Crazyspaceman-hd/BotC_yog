@@ -17,6 +17,9 @@ outputs/
 # ── Sensitive / local-only ────────────────────────────────────────────────────
 cookies.txt
 nul
+.env
+.env.*
+!.env.example
 
 # ── Large media files (safety net) ───────────────────────────────────────────
 *.wav
