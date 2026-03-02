@@ -63,6 +63,43 @@ def _load_videos(db: Path) -> pd.DataFrame:
     return df
 
 
+def _load_wins(db: Path) -> dict:
+    """Return {good: N, evil: N} total win counts from videos table."""
+    con = sqlite3.connect(str(db))
+    df  = pd.read_sql_query(
+        "SELECT winner, COUNT(*) AS n FROM videos GROUP BY winner", con
+    )
+    con.close()
+    good = int(df.loc[df["winner"] == "Good",  "n"].sum()) if not df.empty else 0
+    evil = int(df.loc[df["winner"] == "Evil",  "n"].sum()) if not df.empty else 0
+    return {"good": good, "evil": evil}
+
+
+def _load_words_per_game(db: Path) -> dict[str, float]:
+    """Return {player_name: avg_words_per_game} from segments + speaker_map."""
+    con = sqlite3.connect(str(db))
+    try:
+        wpg_df = pd.read_sql_query(
+            """
+            SELECT sm.name, s.video_id, s.text
+              FROM segments s
+              JOIN speaker_map sm
+                ON s.video_id = sm.video_id AND s.speaker = sm.speaker
+             WHERE sm.name IS NOT NULL
+               AND sm.name != 'Storyteller'
+            """,
+            con,
+        )
+    finally:
+        con.close()
+    if wpg_df.empty:
+        return {}
+    wpg_df["words"] = wpg_df["text"].fillna("").apply(lambda t: len(t.split()))
+    per_game = wpg_df.groupby(["name", "video_id"])["words"].sum().reset_index()
+    avg = per_game.groupby("name")["words"].mean().round(1)
+    return avg.to_dict()
+
+
 def _compute_stats(df: pd.DataFrame) -> dict:
     """Compute all stats needed by the landing page."""
     if df.empty:
@@ -116,8 +153,9 @@ def _compute_stats(df: pd.DataFrame) -> dict:
     pa["good_rate"] = pa["good_g"] / pa["games"].replace(0, float("nan"))
 
     # ── superlatives ──────────────────────────────────────────────────────────
-    qual  = pa[pa["claims"] >= 2]
-    multi = pa[pa["games"]  >= 2]
+    # Only players with more than 5 games
+    qual  = pa[pa["games"] > 5]
+    multi = pa[pa["games"] > 5]
 
     def _top(frame, col, asc=False):
         s = frame.dropna(subset=[col]).sort_values(col, ascending=asc)
@@ -129,9 +167,14 @@ def _compute_stats(df: pd.DataFrame) -> dict:
     most_honest  = _top(qual,  "lie_rate", asc=True)
     most_games   = _top(pa,    "games")
 
-    # Good player who lied most
+    # Good player who lied most (only among players with >5 games)
+    eligible_names = set(multi["player_name"])
     good_lies = (
-        named[(named["team"] == "Good") & (named["verdict"] == "LIE")]
+        named[
+            (named["team"] == "Good") &
+            (named["verdict"] == "LIE") &
+            (named["player_name"].isin(eligible_names))
+        ]
         .groupby("player_name").size()
         .reset_index(name="good_lies")
         .sort_values("good_lies", ascending=False)
@@ -245,9 +288,11 @@ def _empty_stats() -> dict:
     return {
         "summary": {"games": 0, "players": 0, "claims": 0,
                     "lies": 0, "true": 0, "hm": 0, "unverified": 0},
+        "wins": {"good": 0, "evil": 0},
         "superlatives": {k: None for k in
                          ["most_evil", "most_good", "biggest_liar",
-                          "most_honest", "traitor", "most_games"]},
+                          "most_honest", "traitor", "most_games",
+                          "most_talkative"]},
         "top_liars": [],
         "roles":     [],
         "players":   [],
@@ -594,6 +639,75 @@ footer a {{ color: var(--gold); }}
   color: var(--muted);
   font-size: 1rem;
 }}
+
+/* ── Evil vs Good wins scoreboard ── */
+.wins-board {{
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  margin: 28px auto 12px;
+  max-width: 520px;
+}}
+.wins-side {{
+  text-align: center;
+  flex: 1;
+}}
+.wins-label {{
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  font-weight: 700;
+  margin-bottom: 4px;
+}}
+.wins-good .wins-label {{ color: #93c5fd; }}
+.wins-evil .wins-label {{ color: #fca5a5; }}
+.wins-num {{
+  font-size: clamp(3.5rem, 9vw, 5.5rem);
+  font-weight: 900;
+  line-height: 1;
+}}
+.wins-good .wins-num {{
+  color: #60a5fa;
+  text-shadow: 0 0 40px rgba(96,165,250,.45);
+}}
+.wins-evil .wins-num {{
+  color: #f87171;
+  text-shadow: 0 0 40px rgba(248,113,113,.45);
+}}
+.wins-sub {{
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  margin-top: 2px;
+}}
+.wins-vs {{
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--muted);
+  flex: 0 0 auto;
+  padding: 0 4px;
+}}
+.wins-bar-wrap {{
+  max-width: 520px;
+  margin: 0 auto 28px;
+  height: 7px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--border);
+  display: flex;
+}}
+.wins-bar-good {{
+  height: 100%;
+  background: linear-gradient(90deg, #1e40af, #3b82f6);
+  transition: width .8s cubic-bezier(.4,0,.2,1);
+}}
+.wins-bar-evil {{
+  height: 100%;
+  background: linear-gradient(90deg, #dc2626, #b91c1c);
+  transition: width .8s cubic-bezier(.4,0,.2,1);
+}}
 </style>
 </head>
 <body>
@@ -601,6 +715,12 @@ footer a {{ color: var(--gold); }}
 <header>
   <div class="hero-title">🏰 Blood on the Clocktower</div>
   <div class="hero-sub">Yogscast &middot; Automated lie detection across every game</div>
+
+  <div class="wins-board" id="wins-board"></div>
+  <div class="wins-bar-wrap" id="wins-bar-wrap">
+    <div class="wins-bar-good" id="wbar-good"></div>
+    <div class="wins-bar-evil" id="wbar-evil"></div>
+  </div>
 
   <div class="stat-row" id="stat-row"></div>
   <a class="btn-explore" href="{explorer_url}" target="_blank">▶&nbsp; Open Full Explorer</a>
@@ -666,6 +786,33 @@ const DATA   = {data_json};
 const GAMES  = {games_json};
 const EXPLORER = "{explorer_url}";
 
+// ── wins scoreboard ────────────────────────────────────────────────────────────
+(function () {{
+  const w = DATA.wins || {{good: 0, evil: 0}};
+  const board = document.getElementById("wins-board");
+  if (board) {{
+    board.innerHTML =
+      `<div class="wins-side wins-good">
+         <div class="wins-label">Good</div>
+         <div class="wins-num">${{w.good}}</div>
+         <div class="wins-sub">wins</div>
+       </div>
+       <div class="wins-vs">VS</div>
+       <div class="wins-side wins-evil">
+         <div class="wins-label">Evil</div>
+         <div class="wins-num">${{w.evil}}</div>
+         <div class="wins-sub">wins</div>
+       </div>`;
+  }}
+  const total = (w.good + w.evil) || 1;
+  const goodPct = (w.good / total * 100).toFixed(2);
+  const evilPct = (w.evil / total * 100).toFixed(2);
+  const bg = document.getElementById("wbar-good");
+  const be = document.getElementById("wbar-evil");
+  if (bg) bg.style.width = goodPct + "%";
+  if (be) be.style.width = evilPct + "%";
+}})();
+
 // ── stat bubbles ──────────────────────────────────────────────────────────────
 (function () {{
   const s = DATA.summary;
@@ -724,6 +871,12 @@ const EXPLORER = "{explorer_url}";
       name:   s => s.player_name,
       detail: s => `${{s.games}} appearances`,
       bg: "#1a1a2e",
+    }},
+    {{
+      key: "most_talkative", icon: "🗣️", label: "Most Talkative",
+      name:   s => s.player_name,
+      detail: s => `~${{Math.round(s.wpg).toLocaleString()}} words/game avg`,
+      bg: "#1a2a1a",
     }},
   ];
 
@@ -892,6 +1045,32 @@ def build(db: Path, out: Path, explorer_url: str) -> None:
         df    = _load(db)
         stats = _compute_stats(df)
         games = _load_recent_games(db)
+
+    # ── augment stats with wins + words-per-game ──────────────────────────────
+    if db.exists():
+        wins = _load_wins(db)
+        wpg  = _load_words_per_game(db)
+    else:
+        wins = {"good": 0, "evil": 0}
+        wpg  = {}
+
+    stats["wins"] = wins
+
+    # Attach per-player avg words/game
+    for p in stats.get("players", []):
+        p["wpg"] = round(wpg.get(p["name"], 0.0), 1)
+
+    # Most-talkative superlative (players with >5 games only)
+    eligible = [p for p in stats.get("players", []) if p["games"] > 5 and p["name"] in wpg]
+    if eligible:
+        top = max(eligible, key=lambda p: wpg.get(p["name"], 0))
+        stats["superlatives"]["most_talkative"] = {
+            "player_name": top["name"],
+            "wpg":         round(wpg[top["name"]], 0),
+            "games":       top["games"],
+        }
+    else:
+        stats["superlatives"]["most_talkative"] = None
 
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
