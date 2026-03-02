@@ -595,6 +595,41 @@ body.mc .info-close {
   line-height: 28px;
 }
 
+/* ── goblin mode toggle ──────────────────────────────────────────────────── */
+.goblin-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.goblin-toggle label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.goblin-toggle input[type=checkbox] {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: var(--gold);
+  flex-shrink: 0;
+}
+.goblin-hint {
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.6;
+  align-self: center;
+}
+
 /* ── MINECRAFT THEME ─────────────────────────────────────────────────────── */
 body.mc {
   --bg:       #1a1a1a;
@@ -757,6 +792,9 @@ body.mc .record-card .record-title { font-family: 'Press Start 2P', monospace; f
 body.mc .record-card .record-stat { font-family: 'Press Start 2P', monospace; font-size: 0.5rem; }
 body.mc .showmore-row td { background: #3c3c3c !important; }
 body.mc .showmore-btn { font-family: 'Press Start 2P', monospace; font-size: 0.5rem; border-radius: 0; border-color: #5a5a5a; color: #ffaa00; }
+body.mc .goblin-toggle { background: #3c3c3c; border: 2px solid #1a1a1a; border-radius: 0; box-shadow: inset 1px 1px 0 #5a5a5a, inset -1px -1px 0 #2a2a2a; }
+body.mc .goblin-toggle label { font-family: 'Press Start 2P', monospace; font-size: 0.5rem; }
+body.mc .goblin-hint { font-family: 'Press Start 2P', monospace; font-size: 0.42rem; line-height: 2.2; color: #aaaaaa; }
 
 /* ── theme toggle button ──────────────────────────────────────────────────── */
 #theme-toggle {
@@ -823,6 +861,10 @@ body.mc #theme-toggle:active {
 
   <section>
     <div class="section-title"><span>🏆</span> Superlatives</div>
+    <div class="goblin-toggle">
+      <label for="goblin-mode"><input type="checkbox" id="goblin-mode" onchange="toggleGoblinMode(this.checked)"> 🐊 Goblin mode</label>
+      <span class="goblin-hint">The Goblin's ability rewards loudly claiming their own role to bait an execution — this inflates Goblin stats across every table. Leave unchecked for cleaner data.</span>
+    </div>
     <div class="sup-grid" id="sup-grid"></div>
   </section>
 
@@ -927,7 +969,7 @@ body.mc #theme-toggle:active {
 </div>
 
 <footer>
-  Generated 2026-03-02 05:59 UTC &middot;
+  Generated 2026-03-02 06:20 UTC &middot;
   <a href="http://localhost:8501" target="_blank">▶ Open full explorer</a>
 </footer>
 
@@ -939,6 +981,17 @@ const EXPLORER = "http://localhost:8501";
 // ── theme globals & helpers ───────────────────────────────────────────────────
 let _donutChart = null;
 let _barChart   = null;
+let _goblinMode          = false; // false = exclude Goblin (default)
+let _reRenderSuperlatives = null;
+let _reRenderFakeRoles    = null;
+let _reRenderEvilRoles    = null;
+
+function toggleGoblinMode(checked) {
+  _goblinMode = checked;
+  if (_reRenderSuperlatives) _reRenderSuperlatives();
+  if (_reRenderFakeRoles)    _reRenderFakeRoles();
+  if (_reRenderEvilRoles)    _reRenderEvilRoles();
+}
 
 function updateChartTheme() {
   const isMC  = document.body.classList.contains('mc');
@@ -1093,20 +1146,30 @@ function toggleTheme() {
   ];
 
   const grid = document.getElementById("sup-grid");
-  cards.forEach(c => {
-    const data = sup[c.key];
-    const html = data
-      ? `<div class="icon">${c.icon}</div>
-         <div class="label">${c.label}</div>
-         <div class="player">${c.name(data)}</div>
-         <div class="detail">${c.detail(data)}</div>`
-      : `<div class="icon">${c.icon}</div>
-         <div class="label">${c.label}</div>
-         <div class="player" style="color:var(--muted)">—</div>`;
-    grid.innerHTML +=
-      `<div class="sup-card" style="border-color:${c.bg === "#2a1215" ? "#5a1f1f" :
-        c.bg === "#0e1f2a" ? "#1e3a5a" : "var(--border)"};background:${c.bg}">${html}</div>`;
-  });
+  function render() {
+    grid.innerHTML = '';
+    cards.forEach(c => {
+      let data = sup[c.key];
+      // Suppress Goblin in role-based superlatives when goblin mode is off
+      if (!_goblinMode && data && data.role === 'Goblin' &&
+          (c.key === 'most_faked_role' || c.key === 'best_evil_role')) {
+        data = null;
+      }
+      const html = data
+        ? `<div class="icon">${c.icon}</div>
+           <div class="label">${c.label}</div>
+           <div class="player">${c.name(data)}</div>
+           <div class="detail">${c.detail(data)}</div>`
+        : `<div class="icon">${c.icon}</div>
+           <div class="label">${c.label}</div>
+           <div class="player" style="color:var(--muted)">—</div>`;
+      grid.innerHTML +=
+        `<div class="sup-card" style="border-color:${c.bg === "#2a1215" ? "#5a1f1f" :
+          c.bg === "#0e1f2a" ? "#1e3a5a" : "var(--border)"};background:${c.bg}">${html}</div>`;
+    });
+  }
+  _reRenderSuperlatives = render;
+  render();
 })();
 
 // ── doughnut chart ────────────────────────────────────────────────────────────
@@ -1199,9 +1262,9 @@ function toggleTheme() {
   const LIMIT = 10;
   let expanded = false;
   const tbody = document.getElementById("fake-roles-body");
-  const rows  = DATA.fake_roles || [];
 
   function render() {
+    const rows = (DATA.fake_roles || []).filter(r => _goblinMode || r.role !== 'Goblin');
     if (!rows.length) {
       tbody.innerHTML = `<tr><td colspan="4" class="empty">No lie data yet.</td></tr>`;
       return;
@@ -1226,6 +1289,7 @@ function toggleTheme() {
       td.appendChild(btn); tr.appendChild(td); tbody.appendChild(tr);
     }
   }
+  _reRenderFakeRoles = render;
   render();
 })();
 
@@ -1272,10 +1336,15 @@ function toggleTheme() {
     render();
   }
 
-  const evilRoles = DATA.roles.filter(r => r.team === "Evil");
   const goodRoles = DATA.roles.filter(r => r.team === "Good");
-  renderRoles(evilRoles, "evil-roles-body", "#dc2626");
   renderRoles(goodRoles, "good-roles-body", "#2563eb");
+
+  function renderEvil() {
+    const evilRoles = DATA.roles.filter(r => r.team === "Evil" && (_goblinMode || r.role !== 'Goblin'));
+    renderRoles(evilRoles, "evil-roles-body", "#dc2626");
+  }
+  _reRenderEvilRoles = renderEvil;
+  renderEvil();
 })();
 
 // ── games grid ────────────────────────────────────────────────────────────────
