@@ -285,32 +285,40 @@ def _compute_stats(df: pd.DataFrame, exclude_goblin: bool = False) -> dict:
         for _, row in top_liars_df.iterrows()
     ]
 
-    # ── roles most often faked (claimed_role, LIE + TRUE verdicts) ──────────
+    # ── roles most often faked (per-game count, normalises multi-claim games) ──
     fake_src = df[
         df["claimed_role"].notna() &
         (df["claimed_role"].str.lower() != "unknown")
     ]
-    fake_df = (
-        fake_src.groupby("claimed_role")
-        .agg(
-            times_faked  =("verdict", lambda x: (x == "LIE").sum()),
-            times_honest =("verdict", lambda x: (x == "TRUE").sum()),
-        )
-        .reset_index()
+    # Count distinct games (video_id) in which the role was lied about / claimed honestly
+    fake_lies = (
+        fake_src[fake_src["verdict"] == "LIE"]
+        .groupby("claimed_role")["video_id"]
+        .nunique()
+        .reset_index(name="games_faked")
     )
+    fake_honest = (
+        fake_src[fake_src["verdict"] == "TRUE"]
+        .groupby("claimed_role")["video_id"]
+        .nunique()
+        .reset_index(name="games_honest")
+    )
+    fake_df = fake_lies.merge(fake_honest, on="claimed_role", how="outer").fillna(0)
+    fake_df["games_faked"]  = fake_df["games_faked"].astype(int)
+    fake_df["games_honest"] = fake_df["games_honest"].astype(int)
     fake_df["team"] = fake_df["claimed_role"].map(_team)
-    fake_df = fake_df[fake_df["times_faked"] >= 2].sort_values("times_faked", ascending=False)
+    fake_df = fake_df[fake_df["games_faked"] >= 2].sort_values("games_faked", ascending=False)
     most_faked_role = (
-        {"role": str(fake_df.iloc[0]["claimed_role"]),
-         "team": str(fake_df.iloc[0]["team"]),
-         "times_faked": int(fake_df.iloc[0]["times_faked"])}
+        {"role":        str(fake_df.iloc[0]["claimed_role"]),
+         "team":        str(fake_df.iloc[0]["team"]),
+         "games_faked": int(fake_df.iloc[0]["games_faked"])}
         if not fake_df.empty else None
     )
     fake_roles = fake_df.apply(lambda r: {
         "role":         r["claimed_role"],
         "team":         r["team"],
-        "times_faked":  int(r["times_faked"]),
-        "times_honest": int(r["times_honest"]),
+        "games_faked":  int(r["games_faked"]),
+        "games_honest": int(r["games_honest"]),
     }, axis=1).tolist()
 
     # ── role win rates (best performing role per team) ────────────────────────
@@ -1362,14 +1370,14 @@ body.mc #goblin-toggle.goblin-active {{
     <div class="section-title"><span>🎭</span> Role Breakdown <span style="font-size:.8rem;font-weight:400;margin-left:4px;">(min 3 claims)</span></div>
 
     <div class="table-card" style="margin-bottom:20px">
-      <div class="roles-team-hdr roles-faked-hdr" style="background:#1a1430;color:#c4b5fd;border-bottom:1px solid var(--border)">🎭 Roles Most Often Faked <span style="font-size:.78rem;font-weight:400;opacity:.7">(min 2 lies · sorted by times faked)</span></div>
+      <div class="roles-team-hdr roles-faked-hdr" style="background:#1a1430;color:#c4b5fd;border-bottom:1px solid var(--border)">🎭 Roles Most Often Faked <span style="font-size:.78rem;font-weight:400;opacity:.7">(min 2 games · sorted by games used as cover)</span></div>
       <table>
         <thead>
           <tr>
             <th>Claimed Role</th>
             <th>Team</th>
-            <th>Times Faked</th>
-            <th>Times Honest</th>
+            <th>Games as Cover</th>
+            <th>Games Honest</th>
           </tr>
         </thead>
         <tbody id="fake-roles-body"></tbody>
@@ -1599,7 +1607,7 @@ function renderSuperlatives() {{
     {{
       key: "most_faked_role", icon: "🪪", label: "Favourite Cover Story",
       name:   s => s.role,
-      detail: s => `Falsely claimed ${{s.times_faked}} times`,
+      detail: s => `Used as cover in ${{s.games_faked}} game${{s.games_faked !== 1 ? 's' : ''}}`,
       bg: "#1a1430",
     }},
     {{
@@ -1754,8 +1762,8 @@ function renderFakeRoles() {{
         `<tr>
           <td style="font-weight:600">${{r.role}}</td>
           <td><span class="team-${{r.team.toLowerCase()}}">${{r.team}}</span></td>
-          <td>${{r.times_faked}}</td>
-          <td>${{r.times_honest}}</td>
+          <td>${{r.games_faked}}</td>
+          <td>${{r.games_honest}}</td>
         </tr>`;
     }});
     if (rows.length > LIMIT) {{
