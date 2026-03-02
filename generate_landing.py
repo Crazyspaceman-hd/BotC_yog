@@ -100,6 +100,85 @@ def _load_words_per_game(db: Path) -> dict[str, float]:
     return avg.to_dict()
 
 
+def _load_words_per_team(db: Path) -> dict[str, dict]:
+    """Return {player_name: {good: avg_wpg, evil: avg_wpg}} split by team."""
+    con = sqlite3.connect(str(db))
+    try:
+        segs = pd.read_sql_query(
+            """SELECT sm.name, s.video_id, s.text
+                 FROM segments s
+                 JOIN speaker_map sm
+                   ON s.video_id = sm.video_id AND s.speaker = sm.speaker
+                WHERE sm.name IS NOT NULL AND sm.name != 'Storyteller'""",
+            con,
+        )
+        teams_raw = pd.read_sql_query(
+            """SELECT DISTINCT player_name, video_id, actual_role
+                 FROM lies
+                WHERE player_name IS NOT NULL
+                  AND player_name != 'Storyteller'
+                  AND player_name NOT LIKE 'speaker_%'""",
+            con,
+        )
+    finally:
+        con.close()
+    if segs.empty or teams_raw.empty:
+        return {}
+    teams_raw["team"] = teams_raw["actual_role"].map(_team)
+    teams_raw = teams_raw[teams_raw["team"].isin(["Good", "Evil"])].drop_duplicates(
+        subset=["player_name", "video_id"]
+    )
+    segs["words"] = segs["text"].fillna("").apply(lambda t: len(t.split()))
+    per_game = segs.groupby(["name", "video_id"])["words"].sum().reset_index()
+    merged = per_game.merge(
+        teams_raw[["player_name", "video_id", "team"]].rename(columns={"player_name": "name"}),
+        on=["name", "video_id"],
+        how="inner",
+    )
+    result: dict[str, dict] = {}
+    for (name, team), grp in merged.groupby(["name", "team"]):
+        result.setdefault(name, {})[team.lower()] = round(float(grp["words"].mean()), 1)
+    return result
+
+
+def _load_game_records(db: Path) -> dict:
+    """Return record-breaking game stats: most lies, highest lie-rate, most claims."""
+    con = sqlite3.connect(str(db))
+    try:
+        df = pd.read_sql_query(
+            """SELECT v.id, v.title, v.winner,
+                      COUNT(l.rowid) AS total_claims,
+                      SUM(CASE WHEN l.verdict='LIE' THEN 1 ELSE 0 END) AS lie_count
+                 FROM videos v
+                 JOIN lies l ON l.video_id = v.id
+                GROUP BY v.id, v.title, v.winner""",
+            con,
+        )
+    finally:
+        con.close()
+    empty = {"most_lies": None, "most_deceptive": None, "most_claims": None}
+    if df.empty:
+        return empty
+    df["lie_rate"] = (df["lie_count"] / df["total_claims"]).fillna(0)
+
+    def _row(r):
+        return {
+            "id":       str(r["id"]),
+            "title":    str(r["title"]),
+            "winner":   str(r["winner"] or ""),
+            "claims":   int(r["total_claims"]),
+            "lies":     int(r["lie_count"] or 0),
+            "lie_rate": round(float(r["lie_rate"]), 3),
+        }
+
+    qual = df[df["total_claims"] >= 10]
+    return {
+        "most_lies":      _row(df.sort_values("lie_count",    ascending=False).iloc[0]),
+        "most_deceptive": _row(qual.sort_values("lie_rate",   ascending=False).iloc[0]) if not qual.empty else None,
+        "most_claims":    _row(df.sort_values("total_claims", ascending=False).iloc[0]),
+    }
+
+
 def _compute_stats(df: pd.DataFrame) -> dict:
     """Compute all stats needed by the landing page."""
     if df.empty:
@@ -362,10 +441,12 @@ def _empty_stats() -> dict:
                           "most_honest", "traitor", "most_games",
                           "most_talkative", "most_faked_role",
                           "best_evil_role", "best_good_role"]},
-        "top_liars":  [],
-        "fake_roles": [],
-        "roles":      [],
-        "players":    [],
+        "top_liars":      [],
+        "fake_roles":     [],
+        "roles":          [],
+        "players":        [],
+        "voice_analysis": [],
+        "game_records":   {"most_lies": None, "most_deceptive": None, "most_claims": None},
     }
 
 
@@ -801,6 +882,62 @@ footer a {{ color: var(--gold); }}
   transition: width .8s cubic-bezier(.4,0,.2,1);
 }}
 
+/* ── game records grid ── */
+.game-records-grid {{
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+  margin-bottom: 32px;
+}}
+.record-card {{
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 16px;
+  transition: transform .15s, box-shadow .15s;
+}}
+.record-card:hover {{
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+}}
+.record-card .icon {{ font-size: 1.6rem; margin-bottom: 6px; }}
+.record-card .label {{
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--muted);
+  margin-bottom: 4px;
+}}
+.record-card .record-title {{
+  font-size: 0.88rem;
+  font-weight: 600;
+  line-height: 1.35;
+  margin-bottom: 6px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}}
+.record-card .record-stat {{ font-size: 0.78rem; color: var(--muted); }}
+
+/* ── show-more / show-less row ── */
+.showmore-row td {{
+  text-align: center;
+  padding: 10px !important;
+  background: var(--surface) !important;
+}}
+.showmore-btn {{
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--gold);
+  font-size: 0.78rem;
+  padding: 5px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background .1s;
+}}
+.showmore-btn:hover {{ background: var(--surface2); }}
+
 /* ── MINECRAFT THEME ─────────────────────────────────────────────────────── */
 body.mc {{
   --bg:       #1a1a1a;
@@ -950,6 +1087,20 @@ body.mc footer {{
 }}
 body.mc footer a {{ color: #ffaa00; }}
 
+/* ── MC overrides: new elements ── */
+body.mc .record-card {{
+  background: #3c3c3c;
+  border: 2px solid #1a1a1a;
+  border-radius: 0;
+  box-shadow: inset 1px 1px 0 #5a5a5a, inset -1px -1px 0 #2a2a2a;
+}}
+body.mc .record-card:hover {{ transform: none; box-shadow: inset 1px 1px 0 #5a5a5a, inset -1px -1px 0 #2a2a2a; }}
+body.mc .record-card .label {{ font-family: 'Press Start 2P', monospace; font-size: 0.45rem; }}
+body.mc .record-card .record-title {{ font-family: 'Press Start 2P', monospace; font-size: 0.55rem; line-height: 1.8; }}
+body.mc .record-card .record-stat {{ font-family: 'Press Start 2P', monospace; font-size: 0.5rem; }}
+body.mc .showmore-row td {{ background: #3c3c3c !important; }}
+body.mc .showmore-btn {{ font-family: 'Press Start 2P', monospace; font-size: 0.5rem; border-radius: 0; border-color: #5a5a5a; color: #ffaa00; }}
+
 /* ── theme toggle button ──────────────────────────────────────────────────── */
 #theme-toggle {{
   position: fixed;
@@ -1018,6 +1169,11 @@ body.mc #theme-toggle:active {{
   </section>
 
   <section>
+    <div class="section-title"><span>📜</span> Game Records</div>
+    <div class="game-records-grid" id="game-records-grid"></div>
+  </section>
+
+  <section>
     <div class="section-title"><span>📊</span> Lie Breakdown</div>
     <div class="charts-row">
       <div class="chart-card">
@@ -1068,6 +1224,23 @@ body.mc #theme-toggle:active {{
           <tbody id="good-roles-body"></tbody>
         </table>
       </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-title"><span>🗣️</span> Voice Analysis <span style="font-size:.8rem;font-weight:400;margin-left:4px;">(avg words spoken per game · sorted by evil/good ratio)</span></div>
+    <div class="table-card">
+      <table>
+        <thead>
+          <tr>
+            <th>Player</th>
+            <th style="color:#93c5fd">Good WPG</th>
+            <th style="color:#fca5a5">Evil WPG</th>
+            <th>E/G Ratio</th>
+          </tr>
+        </thead>
+        <tbody id="voice-body"></tbody>
+      </table>
     </div>
   </section>
 
@@ -1342,50 +1515,82 @@ function toggleTheme() {{
   }});
 }})();
 
-// ── most-faked roles table ────────────────────────────────────────────────────
+// ── most-faked roles table (collapsible) ──────────────────────────────────────
 (function () {{
+  const LIMIT = 10;
+  let expanded = false;
   const tbody = document.getElementById("fake-roles-body");
   const rows  = DATA.fake_roles || [];
-  if (!rows.length) {{
-    tbody.innerHTML = `<tr><td colspan="4" class="empty">No lie data yet.</td></tr>`;
-    return;
-  }}
-  rows.forEach(r => {{
-    tbody.innerHTML +=
-      `<tr>
-        <td style="font-weight:600">${{r.role}}</td>
-        <td><span class="team-${{r.team.toLowerCase()}}">${{r.team}}</span></td>
-        <td>${{r.times_faked}}</td>
-        <td>${{r.times_honest}}</td>
-      </tr>`;
-  }});
-}})();
 
-// ── roles tables (split Evil / Good) ──────────────────────────────────────────
-(function () {{
-  function renderRoles(roles, tbodyId, barColor) {{
-    const tbody = document.getElementById(tbodyId);
-    if (!roles.length) {{
-      tbody.innerHTML = `<tr><td colspan="4" class="empty" style="padding:20px">—</td></tr>`;
+  function render() {{
+    if (!rows.length) {{
+      tbody.innerHTML = `<tr><td colspan="4" class="empty">No lie data yet.</td></tr>`;
       return;
     }}
-    roles.forEach(r => {{
-      const pct = (r.lie_rate * 100).toFixed(0);
+    tbody.innerHTML = '';
+    (expanded ? rows : rows.slice(0, LIMIT)).forEach(r => {{
       tbody.innerHTML +=
         `<tr>
           <td style="font-weight:600">${{r.role}}</td>
-          <td>${{r.claims}}</td>
-          <td>${{r.lies}}</td>
-          <td>
-            <div class="rate-bar-wrap">
-              <div class="rate-bar">
-                <div class="rate-bar-fill" style="width:${{pct}}%;background:${{barColor}}"></div>
-              </div>
-              <span style="font-size:.8rem;min-width:34px">${{pct}}%</span>
-            </div>
-          </td>
+          <td><span class="team-${{r.team.toLowerCase()}}">${{r.team}}</span></td>
+          <td>${{r.times_faked}}</td>
+          <td>${{r.times_honest}}</td>
         </tr>`;
     }});
+    if (rows.length > LIMIT) {{
+      const tr = document.createElement('tr');
+      tr.className = 'showmore-row';
+      const td = document.createElement('td'); td.colSpan = 4;
+      const btn = document.createElement('button'); btn.className = 'showmore-btn';
+      btn.textContent = expanded ? '▲ Show fewer' : `▼ Show all ${{rows.length}} roles`;
+      btn.onclick = () => {{ expanded = !expanded; render(); }};
+      td.appendChild(btn); tr.appendChild(td); tbody.appendChild(tr);
+    }}
+  }}
+  render();
+}})();
+
+// ── roles tables (split Evil / Good, collapsible) ─────────────────────────────
+(function () {{
+  function renderRoles(roles, tbodyId, barColor) {{
+    const LIMIT = 10;
+    let expanded = false;
+    const tbody = document.getElementById(tbodyId);
+
+    function render() {{
+      if (!roles.length) {{
+        tbody.innerHTML = `<tr><td colspan="4" class="empty" style="padding:20px">—</td></tr>`;
+        return;
+      }}
+      tbody.innerHTML = '';
+      (expanded ? roles : roles.slice(0, LIMIT)).forEach(r => {{
+        const pct = (r.lie_rate * 100).toFixed(0);
+        tbody.innerHTML +=
+          `<tr>
+            <td style="font-weight:600">${{r.role}}</td>
+            <td>${{r.claims}}</td>
+            <td>${{r.lies}}</td>
+            <td>
+              <div class="rate-bar-wrap">
+                <div class="rate-bar">
+                  <div class="rate-bar-fill" style="width:${{pct}}%;background:${{barColor}}"></div>
+                </div>
+                <span style="font-size:.8rem;min-width:34px">${{pct}}%</span>
+              </div>
+            </td>
+          </tr>`;
+      }});
+      if (roles.length > LIMIT) {{
+        const tr = document.createElement('tr');
+        tr.className = 'showmore-row';
+        const td = document.createElement('td'); td.colSpan = 4;
+        const btn = document.createElement('button'); btn.className = 'showmore-btn';
+        btn.textContent = expanded ? '▲ Show fewer' : `▼ Show all ${{roles.length}} roles`;
+        btn.onclick = () => {{ expanded = !expanded; render(); }};
+        td.appendChild(btn); tr.appendChild(td); tbody.appendChild(tr);
+      }}
+    }}
+    render();
   }}
 
   const evilRoles = DATA.roles.filter(r => r.team === "Evil");
@@ -1415,6 +1620,66 @@ function toggleTheme() {{
         </div>
         <a class="game-link" href="${{ytUrl}}" target="_blank">▶ Watch on YouTube →</a>
       </div>`;
+  }});
+}})();
+
+// ── game records ─────────────────────────────────────────────────────────────
+(function () {{
+  const rec  = DATA.game_records || {{}};
+  const grid = document.getElementById('game-records-grid');
+  if (!grid) return;
+  const cards = [
+    {{ key: 'most_lies',      icon: '🤥', label: 'Most Lies in One Game',
+       stat: r => `${{r.lies}} lies · ${{(r.lie_rate*100).toFixed(0)}}% lie rate`, bg: '#2a1215' }},
+    {{ key: 'most_deceptive', icon: '🎭', label: 'Most Deceptive Game',
+       stat: r => `${{(r.lie_rate*100).toFixed(0)}}% lie rate (${{r.lies}}/${{r.claims}} claims)`, bg: '#1a1430' }},
+    {{ key: 'most_claims',    icon: '📋', label: 'Most Role Claims Made',
+       stat: r => `${{r.claims}} claims · ${{r.lies}} lies`, bg: '#0e1f2a' }},
+  ];
+  cards.forEach(c => {{
+    const data = rec[c.key];
+    if (!data) return;
+    const ytUrl = `https://www.youtube.com/watch?v=${{data.id}}`;
+    const wCls  = data.winner === 'Evil' ? 'badge-evil' : data.winner === 'Good' ? 'badge-good' : 'badge-none';
+    grid.innerHTML +=
+      `<div class="record-card" style="background:${{c.bg}}">
+        <div class="icon">${{c.icon}}</div>
+        <div class="label">${{c.label}}</div>
+        <div class="record-title">${{data.title}}</div>
+        <div class="record-stat">${{c.stat(data)}}</div>
+        <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+          <span class="badge ${{wCls}}">${{data.winner || 'Unknown'}} wins</span>
+          <a href="${{ytUrl}}" target="_blank" style="font-size:.75rem">▶ Watch →</a>
+        </div>
+      </div>`;
+  }});
+}})();
+
+// ── voice analysis table ──────────────────────────────────────────────────────
+(function () {{
+  const rows  = DATA.voice_analysis || [];
+  const tbody = document.getElementById('voice-body');
+  if (!tbody) return;
+  if (!rows.length) {{
+    tbody.innerHTML = `<tr><td colspan="4" class="empty" style="padding:32px">Not enough data yet (need ≥4 games on each team).</td></tr>`;
+    return;
+  }}
+  rows.forEach(r => {{
+    const ratio = r.ratio;
+    const rc = ratio >= 1.2 ? '#fca5a5' : ratio <= 0.8 ? '#93c5fd' : 'var(--muted)';
+    const rl = ratio >= 1.2 ? '↑ more chatty as Evil'
+             : ratio <= 0.8 ? '↓ more chatty as Good'
+             : '≈ roughly equal';
+    tbody.innerHTML +=
+      `<tr>
+        <td style="font-weight:600">${{r.name}}</td>
+        <td style="color:#93c5fd">${{r.good_wpg.toLocaleString()}}</td>
+        <td style="color:#fca5a5">${{r.evil_wpg.toLocaleString()}}</td>
+        <td>
+          <span style="font-weight:700;color:${{rc}}">${{ratio.toFixed(2)}}×</span>
+          <span style="font-size:.72rem;color:var(--muted);margin-left:5px">${{rl}}</span>
+        </td>
+      </tr>`;
   }});
 }})();
 
@@ -1471,6 +1736,37 @@ def build(db: Path, out: Path, explorer_url: str) -> None:
         }
     else:
         stats["superlatives"]["most_talkative"] = None
+
+    # ── per-team words-per-game + game records ────────────────────────────────
+    if db.exists():
+        wpg_team     = _load_words_per_team(db)
+        game_records = _load_game_records(db)
+    else:
+        wpg_team     = {}
+        game_records = {"most_lies": None, "most_deceptive": None, "most_claims": None}
+
+    stats["game_records"] = game_records
+
+    # Attach good/evil WPG to each player
+    for p in stats.get("players", []):
+        pt = wpg_team.get(p["name"], {})
+        p["good_wpg"] = round(pt.get("good", 0.0), 1)
+        p["evil_wpg"] = round(pt.get("evil", 0.0), 1)
+
+    # Build voice-analysis rows (players with data on both teams, ≥4 games total)
+    voice_rows = []
+    for p in stats.get("players", []):
+        gw, ew = p.get("good_wpg", 0.0), p.get("evil_wpg", 0.0)
+        if gw > 0 and ew > 0 and p["games"] >= 4:
+            voice_rows.append({
+                "name":     p["name"],
+                "good_wpg": gw,
+                "evil_wpg": ew,
+                "ratio":    round(ew / gw, 2),
+                "games":    p["games"],
+            })
+    voice_rows.sort(key=lambda x: x["ratio"], reverse=True)
+    stats["voice_analysis"] = voice_rows
 
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
