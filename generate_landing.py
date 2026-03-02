@@ -1317,7 +1317,7 @@ body.mc #theme-toggle:active {{
   <section>
     <div class="section-title"><span>🏆</span> Superlatives</div>
     <div class="goblin-toggle">
-      <label for="goblin-mode"><input type="checkbox" id="goblin-mode" onchange="toggleGoblinMode(this.checked)"> 🐊 Goblin mode</label>
+      <label><input type="checkbox" id="goblin-mode" onchange="toggleGoblinMode(this.checked)"> 🐊 Goblin mode</label>
       <span class="goblin-hint">The Goblin's ability rewards loudly claiming their own role to bait an execution — this inflates Goblin stats across every table. Leave unchecked for cleaner data.</span>
     </div>
     <div class="sup-grid" id="sup-grid"></div>
