@@ -37,6 +37,9 @@ nemo_experiments/
 # ── Streamlit cache ───────────────────────────────────────────────────────────
 .streamlit/secrets.toml
 
+# ── Generated artifacts ───────────────────────────────────────────────────────
+landing.html
+
 # ── Local tooling / IDE ────────────────────────────────────────────────────────
 .claude/
 Pictures/

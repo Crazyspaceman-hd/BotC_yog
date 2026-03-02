@@ -283,9 +283,14 @@ if st.session_state.pop("_goto_fix_tab", False):
         """<script>
         (function(){
           function click_tab(){
-            var btns = window.parent.document.querySelectorAll('button[data-baseweb="tab"]');
-            if(btns && btns.length > 5){ btns[5].click(); }
-            else { setTimeout(click_tab, 50); }
+            var btns = Array.from(
+              window.parent.document.querySelectorAll('button[data-baseweb="tab"]')
+            );
+            var target = btns.find(function(b){
+              return b.textContent && b.textContent.includes("Fix Rosters");
+            });
+            if(target){ target.click(); }
+            else if(btns.length > 0){ setTimeout(click_tab, 50); }
           }
           setTimeout(click_tab, 80);
         })();
@@ -1582,12 +1587,18 @@ with tab_fix:
             st.markdown("**🔗 Assign to player**")
             # Build dropdown options from the scraped intro players (unassigned ones)
             player_lookup = {p["name"]: p for p in known_players if p.get("name")}
-            player_names  = ["— skip —"] + sorted(player_lookup.keys())
+            _STORYTELLER  = "🎙️ Storyteller"
+            player_names  = ["— skip —", _STORYTELLER] + sorted(player_lookup.keys())
 
             with st.form(key=f"fix_unlinked_{idx}_{vid}_{spk_id}"):
                 chosen = st.selectbox("Player", options=player_names)
-                # If player is in the scraped roster, auto-show their role
-                if chosen != "— skip —" and chosen in player_lookup:
+                # Show role info / notes depending on selection
+                if chosen == _STORYTELLER:
+                    st.caption(
+                        "Speaker will be marked as the Storyteller — their segments "
+                        "won't be attributed to any player and won't affect lie stats."
+                    )
+                elif chosen != "— skip —" and chosen in player_lookup:
                     p_info = player_lookup[chosen]
                     st.caption(
                         f"Role from intro card: **{p_info.get('actual_role','?')}**"
@@ -1596,13 +1607,21 @@ with tab_fix:
                               p_info["believed_role"] != p_info.get("actual_role")
                            else "")
                     )
-                override_actual = st.text_input("Override actual role (optional)", value="")
+                override_actual = st.text_input(
+                    "Override actual role (optional — leave blank for Storyteller)",
+                    value="",
+                )
                 submitted = st.form_submit_button("💾 Save & next")
 
-            if submitted and chosen != "— skip —":
-                p_info  = player_lookup.get(chosen, {})
-                act     = override_actual.strip().lower() or (p_info.get("actual_role") or "").lower()
-                bel_out = (p_info.get("believed_role") or act).lower()
+            if submitted and chosen not in ("— skip —",):
+                if chosen == _STORYTELLER:
+                    act     = "storyteller"
+                    bel_out = "storyteller"
+                    chosen  = "Storyteller"   # store clean name without emoji
+                else:
+                    p_info  = player_lookup.get(chosen, {})
+                    act     = override_actual.strip().lower() or (p_info.get("actual_role") or "").lower()
+                    bel_out = (p_info.get("believed_role") or act).lower()
 
                 ov_path = _OUTPUTS_DIR / vid / "roster_overrides.json"
                 if ov_path.exists():
@@ -1612,16 +1631,18 @@ with tab_fix:
                 ov_data[spk_id] = {"name": chosen, "actual_role": act, "believed_role": bel_out}
                 _save_overrides(vid, ov_data)
                 _all_roster_issues.clear()
-                next_idx = min(idx + 1, len(filtered) - 1)
-                st.session_state["fix_idx"] = next_idx
+                # Keep same index — fixed issue is gone from rebuilt list so the
+                # item that was at idx+1 is now at idx. Don't +1 or we skip one.
+                st.session_state["fix_idx"] = idx
+                st.session_state["_goto_fix_tab"] = True
                 st.success(
                     f"✅ Saved {spk_id} → {chosen}.  "
                     f"Run `python analyze_roles.py {vid}` then `python build_db.py` to update the DB."
                 )
             elif submitted and chosen == "— skip —":
-                # User wants to skip without assigning — just advance
-                next_idx = min(idx + 1, len(filtered) - 1)
-                st.session_state["fix_idx"] = next_idx
+                # Explicit skip: advance past this item without fixing it
+                st.session_state["fix_idx"] = min(idx + 1, len(filtered) - 1)
+                st.session_state["_goto_fix_tab"] = True
 
     else:
         # ── OCR quality issues: original display + edit path ─────────────────
@@ -1742,14 +1763,14 @@ with tab_fix:
                 )
                 _all_roster_issues.clear()
                 _load_intro_roster.clear()
-                # Advance index — no st.rerun() needed; form submit triggers rerun automatically
-                next_idx = min(idx + 1, len(filtered) - 1)
-                st.session_state["fix_idx"] = next_idx
-            st.session_state["_goto_fix_tab"] = True
-            st.success(
-                f"✅ Saved!  "
-                f"Run `python analyze_roles.py {vid}` then `python build_db.py` to update the DB."
-            )
+                # Keep same index — fixed issue is gone from rebuilt list so the
+                # item that was at idx+1 is now at idx. Don't +1 or we skip one.
+                st.session_state["fix_idx"] = idx
+                st.session_state["_goto_fix_tab"] = True
+                st.success(
+                    f"✅ Saved!  "
+                    f"Run `python analyze_roles.py {vid}` then `python build_db.py` to update the DB."
+                )
 
     st.divider()
 

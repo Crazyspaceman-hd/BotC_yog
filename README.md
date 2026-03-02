@@ -208,6 +208,19 @@ python calibrate_scraper.py <video_id> --window 300 # sample only the first 300 
 python calibrate_scraper.py <video_id> --hsv        # print dominant HSV values in badge area
 ```
 
+### generate_landing.py
+
+Generates a self-contained `landing.html` from `botc.db` — a dark-themed project landing page with stats, superlative player cards, charts, and a recent games list.
+
+```bash
+python generate_landing.py                          # write landing.html
+python generate_landing.py --open                   # write + open in browser
+python generate_landing.py --db PATH --out PATH     # custom paths
+python generate_landing.py --explorer-url http://host:8501  # custom Streamlit URL
+```
+
+Run this after any `build_db.py` run to refresh the page. `landing.html` is git-ignored (generated artifact).
+
 ### build_db.py
 
 Rebuilds `botc.db` from all pipeline outputs. Run this after any `analyze_roles.py` or `scrape_intro.py` run to sync the database used by the web UI. Also imports `roster_overrides.json` (manual role edits from `explore.py`) into the `speaker_map` table.
@@ -221,12 +234,41 @@ python build_db.py --db PATH # write to a custom DB path
 
 ## Web UI
 
-Two Streamlit apps are available for exploring and editing results:
+Three Streamlit apps are available:
 
 ```bash
 streamlit run explore.py        # full editor — changes are saved to disk
 streamlit run explore_public.py # read-only — safe to share/publish
+streamlit run fix_rosters.py    # standalone roster fix tool (see below)
 ```
+
+### fix_rosters.py
+
+Purpose-built tool for working through roster data quality issues one at a time. Run this after `build_db.py` to clean up missing speaker assignments before re-running analysis.
+
+```bash
+streamlit run fix_rosters.py
+```
+
+**What it fixes:**
+
+| Issue | Source | Description |
+|-------|--------|-------------|
+| 🔗 Unlinked speaker | `segments.csv` | `speaker_X` ID has no entry in `roster_overrides.json` — their claims show as UNVERIFIED |
+| 🔁 Duplicate role | `intro_roster.json` | Two players share the same role (OCR read the same card twice) |
+| ❓ Unknown / blank role | `intro_roster.json` | OCR failed to read a player's role |
+| ⚠️ Garbled name | `intro_roster.json` | OCR produced a garbage string in the player name field |
+
+**Workflow:**
+
+1. For each **unlinked speaker**: shows sample transcript lines with clickable YouTube timestamps, lists unassigned intro-roster players as context, then lets you pick the player from `players.txt` and their role from `roles.txt` (auto-filled from intro OCR when available).
+2. For each **OCR issue**: shows the player card, first spoken line, and a form pre-filled with the current values — change name/role via dropdowns and save.
+3. After fixing all issues, run:
+   ```bash
+   python analyze_roles.py --all
+   python build_db.py
+   python generate_landing.py
+   ```
 
 ---
 
