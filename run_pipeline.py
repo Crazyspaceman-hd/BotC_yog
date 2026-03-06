@@ -286,14 +286,16 @@ def main() -> None:
         data = json.loads(PLAYLIST_JSON.read_text(encoding="utf-8"))
         pending = [
             e for e in data.get("entries", [])
-            if e.get("status") != "analyzed" and not e.get("members_only")
+            if e.get("status") != "analyzed"
+            and not e.get("members_only")
+            and not e.get("skip")
         ]
         if not pending:
-            print("Nothing to process. (All videos are either analyzed or members-only.)")
+            print("Nothing to process. (All videos are either analyzed, members-only, or skipped.)")
             return
-        members_only_count = sum(1 for e in data.get("entries", []) if e.get("members_only"))
-        if members_only_count:
-            print(f"Skipping {members_only_count} members-only video(s).")
+        skipped_count = sum(1 for e in data.get("entries", []) if e.get("members_only") or e.get("skip"))
+        if skipped_count:
+            print(f"Skipping {skipped_count} members-only/skip video(s).")
         print(f"Processing {len(pending)} video(s) with steps: {args.steps}")
         for e in pending:
             process_video(e["id"], args.steps, args.force, args.browser)

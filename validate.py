@@ -393,6 +393,56 @@ def check_no_duplicate_pipeline_paths(rpt: Report) -> None:
                 "No script defines its own _EVIL_ROLES (all use botc_ui)")
 
 
+def check_pending_processable(rpt: Report) -> None:
+    """Surface public non-skip videos that are pending but could be processed now."""
+    entries = _load_playlist()
+    if not entries:
+        return
+    processable = [
+        e for e in entries
+        if not e.get("skip")
+        and not e.get("members_only")
+        and e.get("status", "pending") != "analyzed"
+    ]
+    if processable:
+        for e in processable:
+            rpt.add(INFO, "pipeline:pending_processable",
+                    f"status={e.get('status','pending')} - run: python run_pipeline.py {e['id']}",
+                    video_id=e["id"])
+    else:
+        rpt.add(PASS, "pipeline:pending_processable",
+                "All public non-skip videos are fully analyzed")
+
+
+def check_partial_downloads(rpt: Report) -> None:
+    """Detect videos with a webm/raw download but no converted audio.wav."""
+    entries = _load_playlist()
+    if not entries:
+        return
+    raw_exts = ("*.webm", "*.m4a", "*.mp3", "*.mkv")
+    partial = []
+    for e in entries:
+        if e.get("skip"):
+            continue
+        vid = e["id"]
+        out = OUTPUTS_DIR / vid
+        if not out.exists():
+            continue
+        has_wav = (out / "audio.wav").exists()
+        has_raw = any(list(out.glob(ext)) for ext in raw_exts)
+        if has_raw and not has_wav:
+            raw_files = [f.name for ext in raw_exts for f in out.glob(ext)]
+            partial.append((vid, raw_files))
+    if partial:
+        for vid, files in partial:
+            rpt.add(WARN, "pipeline:partial_download",
+                    f"Raw download present {files} but audio.wav missing - re-run download step",
+                    video_id=vid)
+    else:
+        rpt.add(PASS, "pipeline:partial_download",
+                "No partial downloads detected (all raw files have been converted)")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -420,6 +470,8 @@ def main() -> None:
     check_unlinked_speakers(rpt)
     check_winner_coverage(rpt)
     check_ghost_directories(rpt)
+    check_pending_processable(rpt)
+    check_partial_downloads(rpt)
     check_ui_source(rpt)
     check_no_duplicate_pipeline_paths(rpt)
 
@@ -431,7 +483,7 @@ def main() -> None:
 
     print("=" * 60)
     if rpt.has_failures():
-        print("RESULT: FAIL — see ✗ items above")
+        print("RESULT: FAIL -- see XX items above")
         sys.exit(1)
     elif rpt.has_warnings() and args.strict:
         print("RESULT: WARN (--strict mode) -- see !! items above")
