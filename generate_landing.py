@@ -2002,6 +2002,10 @@ def build(db: Path, out: Path, explorer_url: str) -> None:
     def _augment(s: dict) -> None:
         """Attach wins, WPG, voice-analysis and game records to a stats dict."""
         s["wins"] = wins
+        # Override n_games: use videos-table winner count (good+evil) so the
+        # total is always consistent with the scoreboard.  The lies-table count
+        # is lower because some games have zero detectable role claims.
+        s["summary"]["games"] = wins["good"] + wins["evil"]
         for p in s.get("players", []):
             p["wpg"] = round(wpg.get(p["name"], 0.0), 1)
         eligible = [p for p in s.get("players", []) if p["games"] > 5 and p["name"] in wpg]
