@@ -253,9 +253,18 @@ def check_per_video_artifacts(rpt: Report, video_ids: list[str] | None = None) -
 
 
 def check_unlinked_speakers(rpt: Report) -> None:
-    """No analyzed video has unlinked speakers (speaker_X with no override)."""
+    """No analyzed non-blind video has unlinked speakers (speaker_X with no override).
+
+    Blind games are expected to have no speaker links (players don't know their
+    roles; intro roster is unavailable) and are downgraded to INFO.
+    """
     if not DB_PATH.exists():
         return
+    # Build set of blind video IDs so we can classify differently
+    blind_vids: set[str] = {
+        e["id"] for e in _load_playlist()
+        if e.get("blind") or e.get("members_only")
+    }
     try:
         con = sqlite3.connect(str(DB_PATH))
         # Speakers in segments that have NO entry in speaker_map
@@ -270,13 +279,22 @@ def check_unlinked_speakers(rpt: Report) -> None:
             GROUP BY s.video_id, s.speaker
             ORDER BY s.video_id, CAST(REPLACE(s.speaker, 'speaker_', '') AS INTEGER)
         """).fetchall()
-        if unlinked:
-            for vid, spk, n in unlinked:
+        warn_count = 0
+        for vid, spk, n in unlinked:
+            if vid in blind_vids:
+                rpt.add(INFO, "curation:unlinked_speakers",
+                        f"{spk} unlinked ({n} segs) - blind/members game, expected",
+                        video_id=vid)
+            else:
                 rpt.add(WARN, "curation:unlinked_speakers",
                         f"{spk} unlinked ({n} segments)", video_id=vid)
-        else:
+                warn_count += 1
+        if warn_count == 0 and not unlinked:
             rpt.add(PASS, "curation:unlinked_speakers",
                     "All non-Storyteller speakers are linked to a player")
+        elif warn_count == 0:
+            rpt.add(PASS, "curation:unlinked_speakers",
+                    "All unlinked speakers are in blind/members games (expected)")
         con.close()
     except Exception as exc:
         rpt.add(WARN, "curation:unlinked_speakers", f"Could not check: {exc}")
@@ -325,6 +343,7 @@ def check_ghost_directories(rpt: Report) -> None:
     playlist_ids = {e["id"] for e in entries}
     if not OUTPUTS_DIR.exists():
         return
+    ghosts = []
     for d in OUTPUTS_DIR.iterdir():
         if d.is_dir() and d.name not in playlist_ids:
             if not any(d.iterdir()):
@@ -333,6 +352,9 @@ def check_ghost_directories(rpt: Report) -> None:
             else:
                 rpt.add(WARN, "repo:ghost_dirs",
                         f"Directory not in playlist.json: outputs/{d.name}/ (has files)")
+            ghosts.append(d.name)
+    if not ghosts:
+        rpt.add(PASS, "repo:ghost_dirs", "No untracked output directories found")
 
 
 def check_ui_source(rpt: Report) -> None:
