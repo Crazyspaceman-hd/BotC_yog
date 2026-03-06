@@ -36,6 +36,32 @@ from pathlib import Path
 
 from pipeline_utils import normalize_role, load_player_aliases, resolve_player_name
 
+# ── Module-level constants ──────────────────────────────────────────────────────
+
+# Intro region duration used for storyteller detection (mirrors detect_phases.py)
+_INTRO_CUTOFF_S: float = 330.0
+
+# Words that look like targets but carry no game-social meaning as accusation
+# targets.  Accusation/suspicion events whose matched target is one of these are
+# suppressed entirely rather than stored with a meaningless target_player value.
+_TARGET_STOPWORDS: frozenset[str] = frozenset({
+    # pronouns
+    "you", "your", "yours", "yourself",
+    "them", "they", "their", "theirs",
+    "us", "we", "our", "ours",
+    "me", "my", "mine",
+    "him", "his", "her", "hers",
+    "it", "its",
+    # indefinites
+    "anyone", "everyone", "someone", "nobody", "no", "one",
+    "people", "player", "players",
+    # demonstratives / fillers
+    "this", "that", "there", "here",
+    "so", "now", "yeah", "ok", "okay", "think",
+    # articles (regex can match single article words)
+    "the", "a", "an",
+})
+
 # ── Event patterns ─────────────────────────────────────────────────────────────
 # Each: (event_type, compiled_regex, confidence, capture_groups_meaning)
 #   Group 'role'   -> matched role string (for role_claim)
@@ -192,14 +218,37 @@ def _load_known_roles(video_id: str) -> set[str]:
 
 
 def _clean_target(raw: str, known_players: set[str]) -> str | None:
-    """Resolve a raw matched word to a known player name (case-insensitive)."""
+    """Resolve a raw matched word to a known player name (case-insensitive).
+
+    Returns None for stopwords/pronouns so the calling code can suppress events
+    that have no meaningful target (e.g. "kill you", "suspect them").
+    """
     if not raw:
         return None
     raw_low = raw.strip().lower()
+    if raw_low in _TARGET_STOPWORDS:
+        return None  # caller should suppress this event
     for pl in known_players:
         if pl.lower() == raw_low:
             return pl
-    return None
+    return raw.strip()  # preserve unlinked name as-is (e.g. "Duncan" not yet in roster)
+
+
+def _find_storyteller(rows: list[dict]) -> str | None:
+    """Return the dominant speaker ID in the first _INTRO_CUTOFF_S seconds.
+
+    Mirrors detect_phases._find_storyteller so both nodes agree on who the
+    storyteller is without sharing state.
+    """
+    from collections import Counter
+    counts: Counter = Counter()
+    for r in rows:
+        if float(r["start"]) >= _INTRO_CUTOFF_S:
+            break
+        counts[r["speaker"]] += len(r["text"].split())
+    if not counts:
+        return None
+    return counts.most_common(1)[0][0]
 
 
 # ── Core extraction ────────────────────────────────────────────────────────────
@@ -211,6 +260,7 @@ def _extract(video_id: str,
              phase_labels: list[dict],
              known_lies: set[tuple[str, str]],
              known_roles: set[str],
+             storyteller_id: str | None = None,
              ) -> list[dict]:
     known_players = set(roster.keys())  # lower-cased
     events: list[dict] = []
@@ -261,6 +311,13 @@ def _extract(video_id: str,
             break  # one role_claim per segment
 
         # ── target-bearing events ─────────────────────────────────────────────
+        # The storyteller acts as game-master and regularly says things like
+        # "nominate" or "kill" in a procedural context.  Excluding them from
+        # accusation/suspicion/agreement/challenge events avoids a large class
+        # of false positives (they still appear in role_claim if relevant).
+        if spk == storyteller_id:
+            continue
+
         for etype, pats in _ALL_PATS:
             for pat, base_conf in pats:
                 m = pat.search(text)
@@ -271,12 +328,16 @@ def _extract(video_id: str,
                 except IndexError:
                     raw_target = ""
                 target = _clean_target(raw_target, known_players)
+                # Suppress events whose target resolved to a stopword/pronoun
+                # (target == None AND raw was a stopword means no real target).
+                if target is None and raw_target.strip().lower() in _TARGET_STOPWORDS:
+                    break  # skip this event type for this segment
                 events.append({
                     "event_id":        str(uuid.uuid4())[:8],
                     "timestamp_start": ts_str,
                     "speaker":         spk,
                     "player_name":     pname,
-                    "target_player":   target or raw_target,
+                    "target_player":   target or "",
                     "event_type":      etype,
                     "claim_text":      text[:120].replace("\n", " "),
                     "claimed_role":    "",
@@ -369,14 +430,17 @@ def main(video_id: str, force: bool = False) -> None:
     phase_labels = _load_phase_labels(out_dir)
     known_lies   = _load_known_lies(out_dir)
     known_roles  = _load_known_roles(video_id)
+    st_id        = _find_storyteller(rows)
 
     print(f"  Segments: {len(rows)}  Roster players: {len(roster)}")
     print(f"  Speaker map: {speaker_map}")
+    print(f"  Storyteller speaker: {st_id}")
     print(f"  Phase labels: {len(phase_labels)} intervals")
     print(f"  Known lies cross-ref: {len(known_lies)}")
 
     events = _extract(video_id, rows, roster, speaker_map,
-                      phase_labels, known_lies, known_roles)
+                      phase_labels, known_lies, known_roles,
+                      storyteller_id=st_id)
 
     from collections import Counter
     by_type: Counter = Counter(e["event_type"] for e in events)

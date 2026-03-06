@@ -34,6 +34,7 @@ from pathlib import Path
 # ── Tuneable defaults ──────────────────────────────────────────────────────────
 DEFAULT_MIN_FLIP_S = 0.5   # segments shorter than this are candidates for absorption
 DEFAULT_CONTEXT_S  = 2.0   # A/B/A sandwich: B must be shorter than this
+MAX_MERGE_S        = 30.0  # Pass 3 cap: never merge beyond this duration
 
 
 # ── Segment dataclass (plain dict-like tuple for speed) ───────────────────────
@@ -116,15 +117,22 @@ def _pass2_aba(rows: list[dict], context_s: float) -> list[dict]:
 
 # ── Pass 3: merge adjacent same-speaker rows ──────────────────────────────────
 
-def _pass3_merge(rows: list[dict]) -> list[dict]:
-    """Collapse consecutive same-speaker segments into one row."""
+def _pass3_merge(rows: list[dict], max_merge_s: float = MAX_MERGE_S) -> list[dict]:
+    """Collapse consecutive same-speaker segments, capped at max_merge_s.
+
+    Without a cap this pass can create very long super-segments that damage
+    timestamp precision for downstream claim extraction.  Any merge that would
+    push the combined duration past max_merge_s starts a new segment instead.
+    """
     if not rows:
         return rows
     out = [dict(rows[0])]
     for seg in rows[1:]:
-        if seg["speaker"] == out[-1]["speaker"]:
-            out[-1]["end"]  = seg["end"]
-            out[-1]["text"] = (out[-1]["text"] + " " + seg["text"]).strip()
+        prev = out[-1]
+        merged_dur = float(seg["end"]) - float(prev["start"])
+        if seg["speaker"] == prev["speaker"] and merged_dur <= max_merge_s:
+            prev["end"]  = seg["end"]
+            prev["text"] = (prev["text"] + " " + seg["text"]).strip()
         else:
             out.append(dict(seg))
     return out
@@ -148,8 +156,9 @@ def _speaker_dist(rows: list[dict]) -> dict[str, int]:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main(video_id: str,
-         min_flip_s: float = DEFAULT_MIN_FLIP_S,
-         context_s: float  = DEFAULT_CONTEXT_S,
+         min_flip_s: float  = DEFAULT_MIN_FLIP_S,
+         context_s: float   = DEFAULT_CONTEXT_S,
+         max_merge_s: float = MAX_MERGE_S,
          force: bool        = False) -> None:
     out_dir  = Path("outputs") / video_id
     out_path = out_dir / "segments_consistent.csv"
@@ -159,7 +168,7 @@ def main(video_id: str,
         return
 
     print(f"\n=== speaker_consistency.py — {video_id} ===")
-    print(f"  min_flip_s={min_flip_s}s  context_s={context_s}s")
+    print(f"  min_flip_s={min_flip_s}s  context_s={context_s}s  max_merge_s={max_merge_s}s")
 
     rows = _load_segments(out_dir)
     if not rows:
@@ -173,7 +182,7 @@ def main(video_id: str,
     # Apply passes
     segs = _pass1_absorb(rows, min_flip_s)
     segs = _pass2_aba(segs, context_s)
-    segs = _pass3_merge(segs)
+    segs = _pass3_merge(segs, max_merge_s)
 
     after_n     = len(segs)
     after_flips = _count_flips(segs)
@@ -207,10 +216,13 @@ if __name__ == "__main__":
                     help=f"Absorb segments shorter than this (default: {DEFAULT_MIN_FLIP_S}s)")
     ap.add_argument("--context-s", type=float, default=DEFAULT_CONTEXT_S,
                     help=f"A/B/A window size (default: {DEFAULT_CONTEXT_S}s)")
+    ap.add_argument("--max-merge-s", type=float, default=MAX_MERGE_S,
+                    help=f"Pass 3 merge duration cap (default: {MAX_MERGE_S}s)")
     ap.add_argument("--force", action="store_true",
                     help="Overwrite existing segments_consistent.csv")
     args = ap.parse_args()
     main(args.video_id,
          min_flip_s=args.min_flip_s,
          context_s=args.context_s,
+         max_merge_s=args.max_merge_s,
          force=args.force)

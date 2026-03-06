@@ -183,10 +183,16 @@ def _forward_fill(intervals: list[tuple[float, float, str, float, str]],
     last_t     = 0.0
     for s, e, ph, cf, ev in intervals:
         if ph == "Unknown":
-            age   = s - last_t
+            # Never forward-fill "Intro" past the intro region — once the intro
+            # window has closed, an unknown interval is most likely open Day
+            # discussion rather than another introduction segment.
+            fill_phase = last_phase
+            if fill_phase == "Intro" and s > INTRO_CUTOFF_S:
+                fill_phase = "Day"
+            age     = s - last_t
             decayed = max(0.05, 0.6 - age * CONFIDENCE_DECAY_S)
-            out.append((s, e, last_phase, round(decayed, 3),
-                        f"inferred from previous {last_phase}"))
+            out.append((s, e, fill_phase, round(decayed, 3),
+                        f"inferred from previous {fill_phase}"))
         else:
             last_phase = ph
             last_t     = s
@@ -273,8 +279,9 @@ def main(video_id: str, force: bool = False) -> None:
 
     ivs  = _build_intervals(rows, triggers)
     ivs  = _forward_fill(ivs)
-    ivs  = _merge_short(ivs, MIN_PHASE_S)
-    ivs  = _collapse(ivs)
+    ivs  = _collapse(ivs)           # aggregate consecutive same-phase first ...
+    ivs  = _merge_short(ivs, MIN_PHASE_S)  # ... then absorb genuine short islands
+    ivs  = _collapse(ivs)           # re-merge any phases made adjacent by absorption
 
     phase_summary: Counter = Counter(iv[2] for iv in ivs)
     print(f"  Output intervals: {len(ivs)}  phases: {dict(phase_summary)}")
