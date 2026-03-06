@@ -494,7 +494,8 @@
       "title": "Tom the Puppet Master - Blood on the Clocktower in Minecraft",
       "duration": 4116,
       "url": "https://www.youtube.com/watch?v=OaAUvM4SAkg",
-      "status": "pending"
+      "status": "pending",
+      "members_only": true
     }
   ]
 }
