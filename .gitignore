@@ -16,6 +16,7 @@ outputs/
 
 # ── Sensitive / local-only ────────────────────────────────────────────────────
 cookies.txt
+*cookies.txt
 nul
 .env
 .env.*
