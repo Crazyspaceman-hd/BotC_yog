@@ -14,15 +14,24 @@ Algorithm
 ---------
 1. Identify the Storyteller speaker: the dominant talker in the first
    INTRO_CUTOFF_S seconds (word-count weighted).
-2. Scan every segment for keyword patterns.  Each hit produces a
-   (timestamp, phase, weight, evidence_text) trigger.
-   Storyteller triggers receive full weight; other speakers are down-weighted.
+2. Scan every segment for keyword patterns.  Signals are classified as
+   strong (explicit state-change phrases, e.g. "everyone close your eyes")
+   or weak (incidental references, e.g. "night one" in player discussion).
+   Triggers are split into two lists: storyteller-only (st_triggers) and
+   all-speaker (all_triggers, with non-ST speakers downweighted by
+   STORYTELLER_DOWNSCALE).
 3. For every segment boundary, accumulate trigger weights within +-CONTEXT_S.
-   The winning phase is the highest-score phase at that midpoint.
+   In the intro window only st_triggers are used, preventing player chatter
+   from fragmenting the intro region.  After the intro window all_triggers
+   are used.  A minimum absolute score (MIN_SCORE_STRONG / MIN_SCORE_WEAK)
+   is required before a phase label is assigned; below threshold the interval
+   is marked Unknown.
 4. Forward-fill Unknown intervals from the previous known phase, with
-   confidence decaying linearly.
-5. Merge islands shorter than MIN_PHASE_S into their neighbours.
-6. Collapse adjacent same-phase intervals.
+   confidence decaying linearly.  An Intro fill past INTRO_CUTOFF_S
+   becomes Day.
+5. Collapse consecutive same-phase intervals.
+6. Absorb islands shorter than MIN_PHASE_S into their longer neighbour.
+7. Final collapse pass.
 
 Output columns: start, end, phase, confidence, evidence
 
@@ -44,52 +53,85 @@ INTRO_CUTOFF_S        = 330.0   # intro region ends here (unless strong signal)
 MIN_PHASE_S           = 30.0    # minimum island duration before merging
 CONTEXT_S             = 20.0    # keyword context window (+-seconds)
 CONFIDENCE_DECAY_S    = 0.003   # confidence drop per second since last signal
-STORYTELLER_DOWNSCALE = 0.3     # weight multiplier for non-ST keywords in ST-only signals
+STORYTELLER_DOWNSCALE = 0.3     # weight multiplier for non-ST speakers on ST-only signals
+
+# Minimum absolute accumulated score for _vote to assign a phase label.
+# Below the threshold the interval is returned as Unknown, preventing isolated
+# weak player references ("night one", "good morning") from creating false
+# phase transitions when no real evidence is nearby.
+MIN_SCORE_STRONG = 0.20   # sufficient for a single close strong cue
+MIN_SCORE_WEAK   = 0.40   # weak cues must accumulate to overcome this bar
 
 # ── Signal table ───────────────────────────────────────────────────────────────
-# (compiled_regex, phase, weight, storyteller_only)
-_SIGNALS: list[tuple[re.Pattern, str, float, bool]] = []
+# Tuple: (compiled_regex, phase, weight, storyteller_only, strong)
+#
+# strong=True  — explicit, unambiguous phase-boundary ANNOUNCEMENT
+#                (e.g. "everyone close your eyes", "it is now night")
+#                These fire at MIN_SCORE_STRONG.
+#
+# strong=False — incidental / reference phrase that can appear in player
+#                DISCUSSION as well as real announcements
+#                (e.g. "night one", "good morning", "i nominate")
+#                These fire at the higher MIN_SCORE_WEAK bar.
+#
+# st=True      — storyteller-dominant; non-ST speaker gets weight * DOWNSCALE.
+#                Within the intro window, only ST triggers are evaluated at all.
+_SIGNALS: list[tuple[re.Pattern, str, float, bool, bool]] = []
 
-def _sig(pat: str, phase: str, w: float = 1.0, st: bool = False) -> None:
-    _SIGNALS.append((re.compile(pat, re.I), phase, w, st))
+def _sig(pat: str, phase: str, w: float = 1.0,
+         st: bool = False, strong: bool = False) -> None:
+    _SIGNALS.append((re.compile(pat, re.I), phase, w, st, strong))
 
-# Night
-_sig(r"\bit(?:'s| is) now night\b",               "Night", 1.0, True)
+# ── Night ──────────────────────────────────────────────────────────────────────
+# Strong: unambiguous state-transition announcements
+_sig(r"\bit(?:'s| is) now night\b",                      "Night", 1.0, st=True,  strong=True)
+_sig(r"\beveryone (?:close|shut) your eyes\b",           "Night", 0.9, st=True,  strong=True)
+_sig(r"\bclose your eyes\b",                             "Night", 0.8, st=True,  strong=True)
+_sig(r"\bnight (?:begins|starts|falls?|time)\b",         "Night", 0.8, st=True,  strong=True)
+_sig(r"\bsun(?:set|down)\b",                             "Night", 0.7, st=True,  strong=True)
+_sig(r"\bgo to sleep\b",                                 "Night", 0.8, st=True,  strong=True)
+# Weak: reference phrases (players often say "night one" during day discussion)
 _sig(r"\bnight (?:one|two|three|four|five|six|seven|eight|nine|\d+)\b",
-                                                   "Night", 0.9, True)
-_sig(r"\beveryone (?:close|shut) your eyes\b",    "Night", 0.9, True)
-_sig(r"\bnight (?:begins|starts|time)\b",         "Night", 0.8, True)
-_sig(r"\bgood night\b",                           "Night", 0.5, True)
-_sig(r"\bsun(?:set|down)\b",                      "Night", 0.6, True)
-_sig(r"\bnight falls?\b",                         "Night", 0.7, True)
+                                                          "Night", 0.6, st=True,  strong=False)
+_sig(r"\bgood night\b",                                  "Night", 0.4, st=True,  strong=False)
 
-# Day
-_sig(r"\bit(?:'s| is) now day\b",                 "Day",   1.0, True)
+# ── Day ────────────────────────────────────────────────────────────────────────
+# Strong: unambiguous state-transition announcements
+_sig(r"\bit(?:'s| is) now day\b",                        "Day",   1.0, st=True,  strong=True)
+_sig(r"\beveryone (?:open|opens?) your eyes\b",          "Day",   0.9, st=True,  strong=True)
+_sig(r"\bday (?:begins|starts|time)\b",                  "Day",   0.8, st=True,  strong=True)
+_sig(r"\bthe sun rises?\b",                              "Day",   0.8, st=True,  strong=True)
+_sig(r"\bsunrise\b",                                     "Day",   0.7, st=True,  strong=True)
+# Day-start outcome announcements (storyteller reports night results)
+_sig(r"\bno(?:body| one) (?:died|was killed|was murdered)\b",
+                                                          "Day",   0.9, st=True,  strong=True)
+_sig(r"\b(?:someone|a player) (?:died|was found dead|was killed)\b",
+                                                          "Day",   0.8, st=True,  strong=True)
+# Weak: reference phrases
 _sig(r"\bday (?:one|two|three|four|five|six|seven|eight|nine|\d+)\b",
-                                                   "Day",   0.9, True)
-_sig(r"\bgood morning\b",                         "Day",   0.8, True)
-_sig(r"\beveryone (?:open|opens?) your eyes\b",   "Day",   0.9, True)
-_sig(r"\bwake up\b",                              "Day",   0.5, True)
-_sig(r"\bthe sun rises?\b",                       "Day",   0.8, True)
-_sig(r"\bday (?:begins|starts|time)\b",           "Day",   0.8, True)
-_sig(r"\bsunrise\b",                              "Day",   0.7, True)
+                                                          "Day",   0.6, st=True,  strong=False)
+_sig(r"\bgood morning\b",                                "Day",   0.5, st=True,  strong=False)
+_sig(r"\bwake up\b",                                     "Day",   0.4, st=True,  strong=False)
 
-# Nomination
-_sig(r"\bnominations?(?: are| is)? open\b",       "Nomination", 1.0, True)
-_sig(r"\bi nominate\b",                           "Nomination", 0.8, False)
-_sig(r"\bwho (?:do you |would you )?nominate\b",  "Nomination", 0.7, True)
-_sig(r"\bvote(?:s)?(?: are| is)? open\b",         "Nomination", 0.9, True)
-_sig(r"\bput(?:ting)? (?:\w+ )?on the block\b",   "Nomination", 0.7, False)
-_sig(r"\btime to (?:vote|nominate)\b",            "Nomination", 0.8, True)
+# ── Nomination ─────────────────────────────────────────────────────────────────
+# Strong: ST procedural cues
+_sig(r"\bnominations?(?: are| is)? open\b",              "Nomination", 1.0, st=True,  strong=True)
+_sig(r"\bvote(?:s)?(?: are| is)? open\b",                "Nomination", 0.9, st=True,  strong=True)
+_sig(r"\btime to (?:vote|nominate)\b",                   "Nomination", 0.8, st=True,  strong=True)
+_sig(r"\bwho (?:do you |would you )?nominate\b",         "Nomination", 0.7, st=True,  strong=True)
+# Weak: player-initiated (valid but require accumulation to fire)
+_sig(r"\bi nominate\b",                                  "Nomination", 0.6, st=False, strong=False)
+_sig(r"\bput(?:ting)? (?:\w+ )?on the block\b",          "Nomination", 0.5, st=False, strong=False)
 
-# Execution
-_sig(r"\bhas been executed\b",                    "Execution", 1.0, True)
-_sig(r"\byou(?:'ve| have) been executed\b",       "Execution", 1.0, True)
-_sig(r"\bwas executed\b",                         "Execution", 0.9, True)
-_sig(r"\bexecution (?:is )?complete\b",           "Execution", 0.9, True)
-_sig(r"\bput to death\b",                         "Execution", 0.8, True)
-_sig(r"\bthe vote (?:passed|carries)\b",          "Execution", 0.7, True)
-_sig(r"\bis now dead\b",                          "Execution", 0.8, True)
+# ── Execution ──────────────────────────────────────────────────────────────────
+# All strong: these phrases only appear during / immediately after an execution
+_sig(r"\bhas been executed\b",                           "Execution", 1.0, st=True,  strong=True)
+_sig(r"\byou(?:'ve| have) been executed\b",              "Execution", 1.0, st=True,  strong=True)
+_sig(r"\bwas executed\b",                                "Execution", 0.9, st=True,  strong=True)
+_sig(r"\bexecution (?:is )?complete\b",                  "Execution", 0.9, st=True,  strong=True)
+_sig(r"\bput to death\b",                                "Execution", 0.8, st=True,  strong=True)
+_sig(r"\bthe vote (?:passed|carries)\b",                 "Execution", 0.7, st=True,  strong=True)
+_sig(r"\bis now dead\b",                                 "Execution", 0.8, st=True,  strong=True)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -117,48 +159,98 @@ def _find_storyteller(rows: list[dict]) -> str | None:
     return counts.most_common(1)[0][0]
 
 
-def _collect_triggers(rows: list[dict],
-                      st_id: str | None,
-                      ) -> list[tuple[float, str, float, str]]:
-    """Return (timestamp, phase, weight, evidence) for every keyword hit."""
-    triggers = []
+def _collect_triggers(
+    rows: list[dict],
+    st_id: str | None,
+) -> tuple[
+    list[tuple[float, str, float, str, bool]],  # st_triggers
+    list[tuple[float, str, float, str, bool]],  # all_triggers
+]:
+    """Scan segments and return two trigger lists.
+
+    st_triggers  — only signals from the identified storyteller speaker, at
+                   full weight.  Used exclusively in the intro window so that
+                   player chatter (e.g. "night one" in role announcements)
+                   cannot fragment the intro region into false Night blips.
+
+    all_triggers — signals from every speaker; non-ST speakers are downweighted
+                   by STORYTELLER_DOWNSCALE for ST-only signal patterns.
+                   Used for post-intro phase detection.
+
+    Each trigger tuple: (timestamp, phase, eff_weight, evidence_text, strong)
+    """
+    st_triggers:  list[tuple[float, str, float, str, bool]] = []
+    all_triggers: list[tuple[float, str, float, str, bool]] = []
     for row in rows:
-        t    = float(row["start"])
-        text = row["text"]
-        spk  = row["speaker"]
+        t     = float(row["start"])
+        text  = row["text"]
+        spk   = row["speaker"]
         is_st = (spk == st_id) if st_id else False
-        for pat, phase, w, st_only in _SIGNALS:
+        for pat, phase, w, st_only, strong in _SIGNALS:
             if pat.search(text):
                 eff_w = w if (not st_only or is_st) else w * STORYTELLER_DOWNSCALE
-                triggers.append((t, phase, eff_w, text[:80].replace("\n", " ")))
-    return triggers
+                tup   = (t, phase, eff_w, text[:80].replace("\n", " "), strong)
+                all_triggers.append(tup)
+                if is_st:
+                    st_triggers.append(tup)
+    return st_triggers, all_triggers
 
 
-def _vote(t: float,
-          triggers: list[tuple[float, str, float, str]],
-          ) -> tuple[str, float, str]:
-    """Return (phase, confidence, evidence) by weighting nearby triggers."""
+def _vote(
+    t: float,
+    triggers: list[tuple[float, str, float, str, bool]],
+) -> tuple[str, float, str]:
+    """Return (phase, confidence, evidence) by weighting nearby triggers.
+
+    A minimum absolute score (MIN_SCORE_STRONG or MIN_SCORE_WEAK depending on
+    whether any strong cue contributed) must be reached before a phase label is
+    assigned.  Below that threshold the interval is returned as Unknown, so that
+    a single isolated player reference cannot flip the phase.
+    """
     scores: dict[str, float] = {}
+    strong_phases: set[str]  = set()
     top_evid = ""
-    for trig_t, phase, w, evid in triggers:
+    for trig_t, phase, w, evid, strong in triggers:
         dt = abs(t - trig_t)
         if dt <= CONTEXT_S:
             eff = w * (1.0 - dt / CONTEXT_S)
             scores[phase] = scores.get(phase, 0.0) + eff
+            if strong:
+                strong_phases.add(phase)
             if eff > 0.05 and not top_evid:
                 top_evid = evid
     if not scores:
         return "Unknown", 0.0, ""
     best  = max(scores, key=scores.__getitem__)
     total = sum(scores.values())
-    conf  = round(min(scores[best] / max(total, 1e-9), 1.0), 3)
+
+    # Require a minimum absolute score so that low-weight isolated triggers
+    # (e.g. a player mentioning "night one" in day discussion) cannot create
+    # spurious phase labels.  Strong cues set a lower bar; weak cues must
+    # accumulate to overcome the higher threshold.
+    min_s = MIN_SCORE_STRONG if best in strong_phases else MIN_SCORE_WEAK
+    if scores[best] < min_s:
+        return "Unknown", 0.0, ""
+
+    conf = round(min(scores[best] / max(total, 1e-9), 1.0), 3)
     return best, conf, top_evid
 
 
-def _build_intervals(rows: list[dict],
-                     triggers: list[tuple[float, str, float, str]],
-                     ) -> list[tuple[float, float, str, float, str]]:
-    """One interval per unique segment boundary pair."""
+def _build_intervals(
+    rows: list[dict],
+    st_triggers:  list[tuple[float, str, float, str, bool]],
+    all_triggers: list[tuple[float, str, float, str, bool]],
+) -> list[tuple[float, float, str, float, str]]:
+    """One interval per unique segment boundary pair.
+
+    Within the intro window (tmid < INTRO_CUTOFF_S) only storyteller triggers
+    are evaluated.  This prevents player references to "night one" or day/night
+    keywords during role announcements from fragmenting the intro region into
+    spurious Night/Day blips.
+
+    After the intro window all triggers (with player signals downweighted) are
+    used, subject to the MIN_SCORE threshold enforced inside _vote.
+    """
     boundaries = sorted({float(r["start"]) for r in rows}
                         | {float(r["end"])   for r in rows})
     result = []
@@ -167,11 +259,12 @@ def _build_intervals(rows: list[dict],
         t1   = boundaries[i + 1]
         tmid = (t0 + t1) / 2.0
         if tmid < INTRO_CUTOFF_S:
-            phase, conf, evid = _vote(tmid, triggers)
+            # Intro window: only storyteller evidence can override the Intro label.
+            phase, conf, evid = _vote(tmid, st_triggers)
             if phase not in ("Night", "Day", "Nomination", "Execution") or conf < 0.4:
                 phase, conf, evid = "Intro", 0.9, "before intro cutoff"
         else:
-            phase, conf, evid = _vote(tmid, triggers)
+            phase, conf, evid = _vote(tmid, all_triggers)
         result.append((t0, t1, phase, conf, evid))
     return result
 
@@ -271,13 +364,16 @@ def main(video_id: str, force: bool = False) -> None:
     st_id    = _find_storyteller(rows)
     print(f"  Storyteller speaker: {st_id}")
 
-    triggers = _collect_triggers(rows, st_id)
-    print(f"  Keyword triggers: {len(triggers)}")
-    if triggers:
-        phase_hits: Counter = Counter(t[1] for t in triggers)
-        print(f"  Trigger breakdown: {dict(phase_hits)}")
+    st_triggers, all_triggers = _collect_triggers(rows, st_id)
+    print(f"  Keyword triggers: {len(all_triggers)} total"
+          f"  ({len(st_triggers)} from storyteller)")
+    if all_triggers:
+        phase_hits: Counter = Counter(t[1] for t in all_triggers)
+        strong_hits: Counter = Counter(t[1] for t in all_triggers if t[4])
+        print(f"  Trigger breakdown (all): {dict(phase_hits)}")
+        print(f"  Strong cues only:        {dict(strong_hits)}")
 
-    ivs  = _build_intervals(rows, triggers)
+    ivs  = _build_intervals(rows, st_triggers, all_triggers)
     ivs  = _forward_fill(ivs)
     ivs  = _collapse(ivs)           # aggregate consecutive same-phase first ...
     ivs  = _merge_short(ivs, MIN_PHASE_S)  # ... then absorb genuine short islands
