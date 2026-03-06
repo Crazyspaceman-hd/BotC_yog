@@ -851,7 +851,7 @@ body.mc #theme-toggle:active {
   </section>
 
   <section>
-    <div class="section-title"><span>🎭</span> Role Breakdown <span style="font-size:.8rem;font-weight:400;margin-left:4px;">(min 3 claims)</span></div>
+    <div class="section-title"><span>🎭</span> Role Breakdown <span style="font-size:.8rem;font-weight:400;margin-left:4px;">(min 2 games)</span></div>
 
     <div class="table-card" style="margin-bottom:20px">
       <div class="roles-team-hdr roles-faked-hdr" style="background:#1a1430;color:#c4b5fd;border-bottom:1px solid var(--border)">🎭 Roles Most Often Faked <span style="font-size:.78rem;font-weight:400;opacity:.7">(min 2 games · sorted by games used as cover)</span></div>
@@ -872,14 +872,14 @@ body.mc #theme-toggle:active {
       <div class="table-card">
         <div class="roles-team-hdr roles-evil-hdr">😈 Evil Roles</div>
         <table>
-          <thead><tr><th>Role</th><th>Games</th><th>Faked in</th><th>Claimed by other</th><th>Not claimed</th><th>Lie rate</th></tr></thead>
+          <thead><tr><th>Role</th><th>Games</th><th>Lie rate</th></tr></thead>
           <tbody id="evil-roles-body"></tbody>
         </table>
       </div>
       <div class="table-card">
-        <div class="roles-team-hdr roles-good-hdr">😇 Good Roles</div>
+        <div class="roles-team-hdr roles-good-hdr">😇 Good Roles <span style="font-size:.78rem;font-weight:400;opacity:.7">(sorted by cover story usage)</span></div>
         <table>
-          <thead><tr><th>Role</th><th>Games</th><th>Faked in</th><th>Claimed by other</th><th>Not claimed</th><th>Lie rate</th></tr></thead>
+          <thead><tr><th>Role</th><th>Games</th><th>Used as cover story</th><th>Lie rate</th></tr></thead>
           <tbody id="good-roles-body"></tbody>
         </table>
       </div>
@@ -928,7 +928,7 @@ body.mc #theme-toggle:active {
 </div>
 
 <footer>
-  Generated 2026-03-06 19:19 UTC &middot;
+  Generated 2026-03-06 19:30 UTC &middot;
   <a href="http://localhost:8501" target="_blank">▶ Open full explorer</a>
 </footer>
 
@@ -1256,14 +1256,14 @@ renderFakeRoles();
 
 // ── roles tables (split Evil / Good, collapsible) ─────────────────────────────
 function renderRoles() {
-  function renderRoleTable(roles, tbodyId, barColor) {
+  // Evil: 3-column table — Role | Games | Lie rate
+  function renderEvilRoles(roles) {
     const LIMIT = 10;
     let expanded = false;
-    const tbody = document.getElementById(tbodyId);
-
+    const tbody = document.getElementById("evil-roles-body");
     function render() {
       if (!roles.length) {
-        tbody.innerHTML = `<tr><td colspan="6" class="empty" style="padding:20px">—</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="3" class="empty" style="padding:20px">—</td></tr>`;
         return;
       }
       tbody.innerHTML = '';
@@ -1273,13 +1273,10 @@ function renderRoles() {
           `<tr>
             <td style="font-weight:600">${r.role}</td>
             <td>${r.games}</td>
-            <td>${r.games_faked_in}</td>
-            <td>${r.games_claimed_by_other}</td>
-            <td>${r.games_not_claimed}</td>
             <td>
               <div class="rate-bar-wrap">
                 <div class="rate-bar">
-                  <div class="rate-bar-fill" style="width:${pct}%;background:${barColor}"></div>
+                  <div class="rate-bar-fill" style="width:${pct}%;background:#dc2626"></div>
                 </div>
                 <span style="font-size:.8rem;min-width:34px">${pct}%</span>
               </div>
@@ -1289,7 +1286,7 @@ function renderRoles() {
       if (roles.length > LIMIT) {
         const tr = document.createElement('tr');
         tr.className = 'showmore-row';
-        const td = document.createElement('td'); td.colSpan = 6;
+        const td = document.createElement('td'); td.colSpan = 3;
         const btn = document.createElement('button'); btn.className = 'showmore-btn';
         btn.textContent = expanded ? '▲ Show fewer' : `▼ Show all ${roles.length} roles`;
         btn.onclick = () => { expanded = !expanded; render(); };
@@ -1299,10 +1296,51 @@ function renderRoles() {
     render();
   }
 
-  const goodRoles = DATA.roles.filter(r => r.team === "Good");
-  renderRoleTable(goodRoles, "good-roles-body", "#2563eb");
-  const evilRoles = DATA.roles.filter(r => r.team === "Evil");
-  renderRoleTable(evilRoles, "evil-roles-body", "#dc2626");
+  // Good: 4-column table — Role | Games | Used as cover story | Lie rate
+  // sorted by games_claimed_by_other descending
+  function renderGoodRoles(roles) {
+    const LIMIT = 10;
+    let expanded = false;
+    const sorted = [...roles].sort((a, b) => b.games_claimed_by_other - a.games_claimed_by_other);
+    const tbody = document.getElementById("good-roles-body");
+    function render() {
+      if (!sorted.length) {
+        tbody.innerHTML = `<tr><td colspan="4" class="empty" style="padding:20px">—</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = '';
+      (expanded ? sorted : sorted.slice(0, LIMIT)).forEach(r => {
+        const pct = (r.lie_rate * 100).toFixed(0);
+        tbody.innerHTML +=
+          `<tr>
+            <td style="font-weight:600">${r.role}</td>
+            <td>${r.games}</td>
+            <td>${r.games_claimed_by_other}</td>
+            <td>
+              <div class="rate-bar-wrap">
+                <div class="rate-bar">
+                  <div class="rate-bar-fill" style="width:${pct}%;background:#2563eb"></div>
+                </div>
+                <span style="font-size:.8rem;min-width:34px">${pct}%</span>
+              </div>
+            </td>
+          </tr>`;
+      });
+      if (sorted.length > LIMIT) {
+        const tr = document.createElement('tr');
+        tr.className = 'showmore-row';
+        const td = document.createElement('td'); td.colSpan = 4;
+        const btn = document.createElement('button'); btn.className = 'showmore-btn';
+        btn.textContent = expanded ? '▲ Show fewer' : `▼ Show all ${sorted.length} roles`;
+        btn.onclick = () => { expanded = !expanded; render(); };
+        td.appendChild(btn); tr.appendChild(td); tbody.appendChild(tr);
+      }
+    }
+    render();
+  }
+
+  renderEvilRoles(DATA.roles.filter(r => r.team === "Evil"));
+  renderGoodRoles(DATA.roles.filter(r => r.team === "Good"));
 }
 renderRoles();
 
