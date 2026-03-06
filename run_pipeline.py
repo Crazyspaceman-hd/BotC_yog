@@ -111,8 +111,10 @@ def _output_exists(video_id: str, step: str) -> bool:
 
 def _ytdlp(args: list[str]) -> None:
     """Run yt-dlp, print its output live, and raise MembersOnlyError if applicable."""
+    # Use sys.executable -m yt_dlp so we always run the venv's yt-dlp,
+    # not whatever system version happens to be on PATH.
     result = subprocess.run(
-        ["yt-dlp", *args],
+        [sys.executable, "-m", "yt_dlp", *args],
         stderr=subprocess.PIPE,
         text=True,
     )

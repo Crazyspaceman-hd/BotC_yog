@@ -82,7 +82,7 @@
       "members_only": true,
       "members": true,
       "skip": true,
-      "skip_reason": "meta/tutorial video — not a real game"
+      “skip_reason”: “meta/tutorial video - not a real game”
     },
     {
       "id": "JiUp8l3tf6w",
@@ -486,7 +486,7 @@
       "title": "Sips joins the Farmers Alliance - Blood on the Clocktower in Minecraft",
       "duration": 4675,
       "url": "https://www.youtube.com/watch?v=DbF9CPOueTI",
-      "status": "pending",
+      "status": "downloaded",
       "members": false
     },
     {
