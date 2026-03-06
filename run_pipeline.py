@@ -33,15 +33,23 @@ PLAYLIST_JSON = Path("playlist.json")
 
 ALL_STEPS = ["download", "transcribe", "diarize", "merge", "patch", "scrape", "analyze"]
 
+# Optional enrichment steps (N1/N2/N3) — not run by default, not part of
+# playlist.json status machine, do not block existing pipeline.
+ENRICH_STEPS = ["consistency", "phases", "claims"]
+
 # Expected output file for each step (relative to outputs/<video_id>/)
 _STEP_OUTPUT = {
-    "download":   "audio.wav",
-    "transcribe": "whisper_segments.jsonl",
-    "diarize":    "diarization.rttm",
-    "merge":      "segments.csv",
-    "patch":      "segments_patched.csv",
-    "scrape":     "intro_roster.json",
-    "analyze":    "lie_analysis.csv",
+    "download":    "audio.wav",
+    "transcribe":  "whisper_segments.jsonl",
+    "diarize":     "diarization.rttm",
+    "merge":       "segments.csv",
+    "patch":       "segments_patched.csv",
+    "scrape":      "intro_roster.json",
+    "analyze":     "lie_analysis.csv",
+    # enrichment steps
+    "consistency": "segments_consistent.csv",
+    "phases":      "phase_labels.csv",
+    "claims":      "claims.csv",
 }
 
 # Phrases in yt-dlp stderr that indicate a members-only video
@@ -235,7 +243,23 @@ def _run_step(step: str, video_id: str, force: bool, browser: str | None = None)
         import analyze_roles
         analyze_roles.main(video_id)
 
-    _refresh_playlist_status(video_id)
+    # ── Optional enrichment steps (N1/N2/N3) ──────────────────────────────
+    elif step == "consistency":
+        import speaker_consistency
+        speaker_consistency.main(video_id, force=force)
+
+    elif step == "phases":
+        import detect_phases
+        detect_phases.main(video_id, force=force)
+
+    elif step == "claims":
+        import extract_claims
+        extract_claims.main(video_id, force=force)
+
+    # Enrichment steps do NOT update playlist.json status (they are optional
+    # post-processing and not part of the status state machine).
+    if step not in ENRICH_STEPS:
+        _refresh_playlist_status(video_id)
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +286,7 @@ def main() -> None:
         help="YouTube video ID (omit when using --all)",
     )
     ap.add_argument(
-        "--steps", nargs="+", choices=ALL_STEPS, default=ALL_STEPS,
+        "--steps", nargs="+", choices=ALL_STEPS + ENRICH_STEPS, default=ALL_STEPS,
         metavar="STEP",
         help=f"Steps to run (default: all). Choices: {ALL_STEPS}",
     )
