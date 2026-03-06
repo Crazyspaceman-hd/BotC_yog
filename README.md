@@ -221,6 +221,25 @@ python generate_landing.py --explorer-url http://host:8501  # custom Streamlit U
 
 Run this after any `build_db.py` run to refresh the page. `landing.html` is git-ignored (generated artifact).
 
+### auto_assign_speakers.py
+
+Heuristic tool that scans all transcripts and proposes speaker→player name mappings. Run this **after** the per-video pipeline steps are complete for a batch of videos. It writes proposals to `roster_overrides.json` for CERTAIN/HIGH-confidence assignments; the rest must be fixed manually in `fix_rosters.py`.
+
+```bash
+python auto_assign_speakers.py               # dry run — print proposals only
+python auto_assign_speakers.py --apply       # write CERTAIN + HIGH assignments
+python auto_assign_speakers.py --apply --include-medium  # also write MEDIUM (process of elimination)
+python auto_assign_speakers.py --video <id>  # single video only
+python auto_assign_speakers.py --out report.json  # save full report to JSON
+```
+
+After applying, run:
+
+```bash
+python analyze_roles.py --all
+python build_db.py
+```
+
 ### build_db.py
 
 Rebuilds `botc.db` from all pipeline outputs. Run this after any `analyze_roles.py` or `scrape_intro.py` run to sync the database used by the web UI. Also imports `roster_overrides.json` (manual role edits from `explore.py`) into the `speaker_map` table.
@@ -229,6 +248,12 @@ Rebuilds `botc.db` from all pipeline outputs. Run this after any `analyze_roles.
 python build_db.py           # rebuild botc.db (default)
 python build_db.py --db PATH # write to a custom DB path
 ```
+
+---
+
+## Pipeline diagram
+
+See [`docs/pipeline_dag.md`](docs/pipeline_dag.md) for the full node-by-node DAG with inputs, outputs, commands, and acceptance criteria for every step.
 
 ---
 
@@ -299,7 +324,14 @@ outputs/
 |------|---------|
 | `players.txt` | One Yogscast player name per line — used as Whisper `initial_prompt` and for fuzzy matching |
 | `roles.txt` | One BotC role name per line — used for fuzzy matching in scrape and patch steps |
+| `player_aliases.json` | `{"alias": "canonical_name"}` — resolves name variants (e.g. `"Mscupcakes"→"Sophie"`) across all steps |
 | `nemo_diar.yaml` | NeMo diarization hyperparameters (sample rate, clustering settings, model paths) |
 | `cookies.txt` | Netscape-format cookies for member-only YouTube video access (auto-detected if present) |
 | `playlist.json` | Cached playlist metadata and per-video processing status (written by `fetch_playlist.py`) |
 | `botc.db` | SQLite database — rebuilt by `build_db.py`; read by the web UI (`explore_public.py`) |
+
+Per-video artifacts (in `outputs/<video_id>/`, gitignored):
+
+| File | Written by | Purpose |
+|------|-----------|---------|
+| `roster_overrides.json` | `auto_assign_speakers.py`, `fix_rosters.py`, `explore.py` | Manual speaker→player name+role mappings; merged into `speaker_map` table by `build_db.py` |
