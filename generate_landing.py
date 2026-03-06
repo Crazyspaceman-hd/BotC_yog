@@ -357,26 +357,65 @@ def _compute_stats(df: pd.DataFrame, exclude_goblin: bool = False) -> dict:
     best_evil_role = _best_role("Evil")
     best_good_role = _best_role("Good")
 
-    # ── role breakdown (sorted by lie rate, min 3 claims) ─────────────────────
-    role_df = (
-        df[df["actual_role"].notna() & (df["actual_role"].str.lower() != "unknown")]
-        .groupby("actual_role")
-        .agg(
-            claims =("verdict", "count"),
-            lies   =("verdict", lambda x: (x == "LIE").sum()),
-            team   =("team",    lambda x: x.mode().iloc[0] if not x.empty else "Good"),
-        )
-        .reset_index()
+    # ── role breakdown (per-game counts, min 2 games) ────────────────────────
+    _rb = df[df["actual_role"].notna() & ~df["actual_role"].str.lower().isin(["", "unknown"])].copy()
+
+    # distinct games where this role appeared as actual_role
+    _role_games = _rb.groupby("actual_role")["video_id"].nunique().rename("games")
+
+    # distinct games where the holder of this role told a lie
+    _role_faked = (
+        _rb[_rb["verdict"] == "LIE"]
+        .groupby("actual_role")["video_id"].nunique().rename("games_faked_in")
     )
-    role_df = role_df[role_df["claims"] >= 3].copy()
-    role_df["lie_rate"] = role_df["lies"] / role_df["claims"].replace(0, float("nan"))
+
+    # most common team per role
+    _role_team = (
+        _rb.groupby("actual_role")["team"]
+        .agg(lambda x: x.mode().iloc[0] if not x.empty else "Good")
+        .rename("team")
+    )
+
+    # games where someone NOT holding this role claimed it (bluffs / cover stories)
+    _other = df[
+        df["claimed_role"].notna() &
+        ~df["claimed_role"].str.lower().isin(["", "unknown"]) &
+        (df["claimed_role"] != df["actual_role"])
+    ]
+    _role_claimed_other = (
+        _other.groupby("claimed_role")["video_id"].nunique()
+        .rename("games_claimed_by_other")
+        .rename_axis("actual_role")
+    )
+
+    # games where role was present but nobody (holder or anyone else) ever claimed it
+    _games_with_role    = _rb.groupby("actual_role")["video_id"].apply(set)
+    _claimed_all        = df[df["claimed_role"].notna() & (df["claimed_role"] != "")]
+    _games_role_claimed = _claimed_all.groupby("claimed_role")["video_id"].apply(set).rename_axis("actual_role")
+
+    role_df = pd.concat([_role_games, _role_faked, _role_team], axis=1).reset_index()
+    role_df = role_df.merge(
+        _role_claimed_other.reset_index(), on="actual_role", how="left"
+    )
+    role_df["games_not_claimed"] = role_df["actual_role"].map(
+        lambda r: len(_games_with_role.get(r, set()) - _games_role_claimed.get(r, set()))
+    )
+    role_df[["games_faked_in", "games_claimed_by_other"]] = (
+        role_df[["games_faked_in", "games_claimed_by_other"]].fillna(0).astype(int)
+    )
+    role_df = role_df[role_df["games"] >= 2].copy()
+    role_df["lie_rate"] = (
+        role_df["games_faked_in"] / role_df["games"].replace(0, float("nan"))
+    )
     role_df = role_df.sort_values("lie_rate", ascending=False)
     roles = role_df.apply(lambda r: {
-        "role":     r["actual_role"],
-        "team":     r["team"],
-        "claims":   int(r["claims"]),
-        "lies":     int(r["lies"]),
-        "lie_rate": round(float(r["lie_rate"]), 3),
+        "role":                   r["actual_role"],
+        "team":                   r["team"],
+        "games":                  int(r["games"]),
+        "games_faked_in":         int(r["games_faked_in"]),
+        "games_claimed_by_other": int(r["games_claimed_by_other"]),
+        "games_not_claimed":      int(r["games_not_claimed"]),
+        "lie_rate":               round(float(r["lie_rate"]), 3) if pd.notna(r["lie_rate"]) else 0.0,
     }, axis=1).tolist()
 
     # ── all-player table (for the leaderboard section) ────────────────────────
@@ -1347,14 +1386,14 @@ body.mc #theme-toggle:active {{
       <div class="table-card">
         <div class="roles-team-hdr roles-evil-hdr">😈 Evil Roles</div>
         <table>
-          <thead><tr><th>Role</th><th>Claims</th><th>Lies</th><th>Lie rate</th></tr></thead>
+          <thead><tr><th>Role</th><th>Games</th><th>Faked in</th><th>Claimed by other</th><th>Not claimed</th><th>Lie rate</th></tr></thead>
           <tbody id="evil-roles-body"></tbody>
         </table>
       </div>
       <div class="table-card">
         <div class="roles-team-hdr roles-good-hdr">😇 Good Roles</div>
         <table>
-          <thead><tr><th>Role</th><th>Claims</th><th>Lies</th><th>Lie rate</th></tr></thead>
+          <thead><tr><th>Role</th><th>Games</th><th>Faked in</th><th>Claimed by other</th><th>Not claimed</th><th>Lie rate</th></tr></thead>
           <tbody id="good-roles-body"></tbody>
         </table>
       </div>
@@ -1738,7 +1777,7 @@ function renderRoles() {{
 
     function render() {{
       if (!roles.length) {{
-        tbody.innerHTML = `<tr><td colspan="4" class="empty" style="padding:20px">—</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="empty" style="padding:20px">—</td></tr>`;
         return;
       }}
       tbody.innerHTML = '';
@@ -1747,8 +1786,10 @@ function renderRoles() {{
         tbody.innerHTML +=
           `<tr>
             <td style="font-weight:600">${{r.role}}</td>
-            <td>${{r.claims}}</td>
-            <td>${{r.lies}}</td>
+            <td>${{r.games}}</td>
+            <td>${{r.games_faked_in}}</td>
+            <td>${{r.games_claimed_by_other}}</td>
+            <td>${{r.games_not_claimed}}</td>
             <td>
               <div class="rate-bar-wrap">
                 <div class="rate-bar">
@@ -1762,7 +1803,7 @@ function renderRoles() {{
       if (roles.length > LIMIT) {{
         const tr = document.createElement('tr');
         tr.className = 'showmore-row';
-        const td = document.createElement('td'); td.colSpan = 4;
+        const td = document.createElement('td'); td.colSpan = 6;
         const btn = document.createElement('button'); btn.className = 'showmore-btn';
         btn.textContent = expanded ? '▲ Show fewer' : `▼ Show all ${{roles.length}} roles`;
         btn.onclick = () => {{ expanded = !expanded; render(); }};

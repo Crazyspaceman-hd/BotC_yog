@@ -29,7 +29,7 @@ import json
 import re
 from pathlib import Path
 
-from pipeline_utils import parse_rttm, load_player_aliases, resolve_player_name
+from pipeline_utils import parse_rttm, load_player_aliases, resolve_player_name, normalize_role
 
 INTRO_CUTOFF   = 300.0        # seconds — used to build the initial roster
 STORYTELLER_ID = "speaker_0"  # diarization always assigns lead voice to spk_0
@@ -620,13 +620,15 @@ def scan_for_lies(
         believed_at, actual_at = get_role_at(speaker, seg["start"], roster)
 
         for m in role_claim_re.finditer(seg["text"]):
-            claimed = next(v for v in m.groupdict().values() if v).lower()
+            claimed       = normalize_role(next(v for v in m.groupdict().values() if v))
+            actual_norm   = normalize_role(actual_at)
+            believed_norm = normalize_role(believed_at)
 
-            if actual_at == "unknown":
+            if actual_norm == "unknown":
                 verdict = "UNVERIFIED"
-            elif claimed == actual_at:
+            elif claimed == actual_norm:
                 verdict = "TRUE"
-            elif claimed == believed_at and believed_at != actual_at:
+            elif claimed == believed_norm and believed_norm != actual_norm:
                 verdict = "HONEST MISTAKE"
             else:
                 verdict = "LIE"
@@ -635,9 +637,9 @@ def scan_for_lies(
                 "timestamp":    fmt_ts(seg["start"]),
                 "speaker":      speaker,
                 "player_name":  player_name,
-                "actual_role":  actual_at,
-                "believed_role": believed_at,
-                "claimed_role": claimed,
+                "actual_role":  actual_norm,    # normalized: lowercase, spaces
+                "believed_role": believed_norm, # normalized: lowercase, spaces
+                "claimed_role": claimed,        # already normalize_role()'d above
                 "verdict":      verdict,
                 "text":         seg["text"],
             })

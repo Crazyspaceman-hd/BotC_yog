@@ -1,13 +1,25 @@
 # transcribe.py
 import argparse
 import json
+import os
+import sys
 import time
 from pathlib import Path
+
+# On Windows, nvidia Python wheels (e.g. nvidia-cublas-cu12) install DLLs under
+# site-packages/nvidia/*/bin/ but don't add themselves to PATH.  ctranslate2
+# needs cublas64_12.dll at import time, so we register every nvidia bin dir via
+# os.add_dll_directory() before importing faster_whisper.
+if sys.platform == "win32":
+    _sp = Path(sys.executable).parent / "Lib" / "site-packages"
+    for _nvidia_bin in _sp.glob("nvidia/*/bin"):
+        if _nvidia_bin.is_dir():
+            os.add_dll_directory(str(_nvidia_bin))
 
 from faster_whisper import WhisperModel
 
 # Tweak these if you want faster/slower
-MODEL_SIZE = "small"   # change to "medium" later if you want
+MODEL_SIZE = "medium"  # "small" ~12x RT | "medium" ~4x RT | "large-v3" ~1.5x RT
 DEVICE = "cuda"
 COMPUTE = "float16"
 

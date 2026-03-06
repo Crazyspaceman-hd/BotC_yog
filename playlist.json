@@ -80,7 +80,9 @@
       "url": "https://www.youtube.com/watch?v=OYTaTtjk3ac",
       "status": "pending",
       "members_only": true,
-      "members": true
+      "members": true,
+      "skip": true,
+      "skip_reason": "meta/tutorial video — not a real game"
     },
     {
       "id": "JiUp8l3tf6w",
@@ -132,9 +134,12 @@
       "title": "Lewis is finally a player! | Blood on the Clocktower in Minecraft Bonus",
       "duration": 2425,
       "url": "https://www.youtube.com/watch?v=tf_LO5NKKUU",
-      "status": "pending",
+      "status": "analyzed",
       "members_only": true,
-      "members": true
+      "members": true,
+      "needs_manual_st": true,
+      "winner": "Good",
+      "num_speakers": 8
     },
     {
       "id": "WfGn_RCZlfA",
@@ -150,9 +155,11 @@
       "title": "Nilesy's annoying wish | Blood on the Clocktower in Minecraft Bonus",
       "duration": 4835,
       "url": "https://www.youtube.com/watch?v=HQlYPDUfM4Q",
-      "status": "pending",
+      "status": "analyzed",
       "members_only": true,
-      "members": true
+      "members": true,
+      "winner": "Evil",
+      "num_speakers": 8
     },
     {
       "id": "-Ejl5ODVNg0",
@@ -186,9 +193,10 @@
       "title": "Oops, all Lunatics | Blood on the Clocktower Bonus",
       "duration": 3930,
       "url": "https://www.youtube.com/watch?v=DAb9sq5ku2k",
-      "status": "downloaded",
+      "status": "analyzed",
       "members_only": true,
-      "members": true
+      "members": true,
+      "winner": "Evil"
     },
     {
       "id": "uqSFiznniIQ",
@@ -222,9 +230,10 @@
       "title": "Zylus's Evil Grandchild | Blood on the Clocktower Bonus",
       "duration": 3918,
       "url": "https://www.youtube.com/watch?v=F2f0nNeoWQM",
-      "status": "pending",
+      "status": "analyzed",
       "members_only": true,
-      "members": true
+      "members": true,
+      "winner": "Good"
     },
     {
       "id": "BBX14ec_Y1Q",
@@ -249,7 +258,7 @@
       "title": "No one knows their roles! | Blood on the Clocktower Bonus",
       "duration": 4857,
       "url": "https://www.youtube.com/watch?v=d2M-N5iABRo",
-      "status": "pending",
+      "status": "analyzed",
       "members_only": true,
       "members": true,
       "blind": true

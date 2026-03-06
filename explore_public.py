@@ -1232,6 +1232,77 @@ with tab_aggregate:
 
         st.divider()
 
+        # ── Role breakdown (per-game counts) ──────────────────────────────────
+        st.subheader("Role breakdown")
+        st.caption(
+            "Per-game counts for each actual role. "
+            "**Faked in** = games where the role holder lied about their role. "
+            "**Claimed by other** = games where a different player bluffed as this role. "
+            "**Not claimed** = games where this role was present but nobody ever claimed it."
+        )
+
+        _rb_base = all_lies[
+            all_lies["actual_role"].notna() &
+            ~all_lies["actual_role"].str.lower().isin(["", "unknown"])
+        ].copy()
+
+        _rb_games = _rb_base.groupby("actual_role")["video_id"].nunique().rename("Games")
+        _rb_faked = (
+            _rb_base[_rb_base["verdict"] == "LIE"]
+            .groupby("actual_role")["video_id"].nunique().rename("Faked in")
+        )
+        _rb_team = (
+            _rb_base.groupby("actual_role")["team"]
+            .agg(lambda x: x.mode().iloc[0] if not x.empty else "Good")
+            .rename("Team")
+        )
+        _rb_other = all_lies[
+            all_lies["claimed_role"].notna() &
+            ~all_lies["claimed_role"].str.lower().isin(["", "unknown"]) &
+            (all_lies["claimed_role"] != all_lies["actual_role"])
+        ]
+        _rb_claimed_other = (
+            _rb_other.groupby("claimed_role")["video_id"].nunique()
+            .rename("Claimed by other")
+            .rename_axis("actual_role")
+        )
+        _rb_gwr = _rb_base.groupby("actual_role")["video_id"].apply(set)
+        _rb_claimed_all = all_lies[
+            all_lies["claimed_role"].notna() & (all_lies["claimed_role"] != "")
+        ]
+        _rb_grc = _rb_claimed_all.groupby("claimed_role")["video_id"].apply(set).rename_axis("actual_role")
+
+        role_breakdown = pd.concat([_rb_games, _rb_faked, _rb_team], axis=1).reset_index()
+        role_breakdown = role_breakdown.rename(columns={"actual_role": "Role"})
+        role_breakdown = role_breakdown.merge(
+            _rb_claimed_other.reset_index().rename(columns={"actual_role": "Role"}),
+            on="Role", how="left",
+        )
+        role_breakdown["Not claimed"] = role_breakdown["Role"].map(
+            lambda r: len(_rb_gwr.get(r, set()) - _rb_grc.get(r, set()))
+        )
+        role_breakdown[["Faked in", "Claimed by other"]] = (
+            role_breakdown[["Faked in", "Claimed by other"]].fillna(0).astype(int)
+        )
+        role_breakdown = role_breakdown[role_breakdown["Games"] >= 2].copy()
+        role_breakdown["Lie rate"] = (
+            role_breakdown["Faked in"] / role_breakdown["Games"].replace(0, float("nan"))
+        ).map(lambda v: f"{v:.0%}" if pd.notna(v) else "—")
+        role_breakdown = role_breakdown.sort_values("Faked in", ascending=False)
+
+        col_evil_rb, col_good_rb = st.columns(2)
+        for _col, _team_val in [(col_evil_rb, "Evil"), (col_good_rb, "Good")]:
+            _icon = "😈" if _team_val == "Evil" else "😇"
+            _col.markdown(f"**{_icon} {_team_val} roles**")
+            _sub = role_breakdown[role_breakdown["Team"] == _team_val].drop(columns="Team")
+            _col.dataframe(
+                _sub.style.apply(_color_scale, subset=["Faked in"]),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        st.divider()
+
         # ── Player deep-dive ──────────────────────────────────────────────────
         st.subheader("🔍 Player deep-dive")
 

@@ -66,6 +66,41 @@ def _heartbeat(stop_evt: threading.Event, work_dir: Path) -> None:
         stop_evt.wait(10)
 
 
+def _resolve_num_speakers(video_id: str) -> int:
+    """
+    Return the speaker count to pass to NeMo for *video_id*.
+
+    Priority (highest → lowest):
+      1. intro_roster.json player count + 1 (Storyteller)  — most accurate
+      2. playlist.json  num_speakers field  — manual per-game override
+      3. 9  — standard Yogscast format (8 players + 1 Storyteller)
+
+    To override for a non-standard game, add "num_speakers": N to its
+    entry in playlist.json before running the diarize step.
+    """
+    roster_json = Path(f"outputs/{video_id}/intro_roster.json")
+    if roster_json.exists():
+        try:
+            players = json.loads(roster_json.read_text(encoding="utf-8")).get("players", [])
+            if players:
+                return len(players) + 1   # players + Storyteller
+        except Exception:
+            pass
+
+    playlist = Path("playlist.json")
+    if playlist.exists():
+        try:
+            data = json.loads(playlist.read_text(encoding="utf-8"))
+            for e in data.get("entries", []):
+                if e.get("id") == video_id and e.get("num_speakers"):
+                    return int(e["num_speakers"])
+        except Exception:
+            pass
+
+    # Standard Yogscast BotC format: 8 players + 1 Storyteller = 9 speakers
+    return 9
+
+
 def main(video_id: str) -> None:
     out_dir = Path(f"outputs/{video_id}")
     audio = out_dir / "audio_16k.wav"
@@ -74,13 +109,16 @@ def main(video_id: str) -> None:
 
     work.mkdir(parents=True, exist_ok=True)
 
+    num_speakers = _resolve_num_speakers(video_id)
+    print(f"Speaker count: {num_speakers}  (oracle=yes)")
+
     manifest = {
         "audio_filepath": str(audio),
         "offset": 0,
         "duration": None,
         "label": "infer",
         "text": "",
-        "num_speakers": 9,
+        "num_speakers": num_speakers,
         "rttm_filepath": None,
         "uem_filepath": None,
     }
@@ -101,7 +139,7 @@ def main(video_id: str) -> None:
     cfg.diarizer.oracle_vad = False
     cfg.diarizer.vad.model_path = "vad_multilingual_marblenet"
     cfg.diarizer.speaker_embeddings.model_path = "titanet_large"
-    cfg.diarizer.clustering.parameters.oracle_num_speakers = False
+    cfg.diarizer.clustering.parameters.oracle_num_speakers = True
 
     stop = threading.Event()
     t = threading.Thread(target=_heartbeat, args=(stop, work), daemon=True)

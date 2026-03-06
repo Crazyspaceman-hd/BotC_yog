@@ -52,3 +52,23 @@ def best_speaker(a: float, b: float,
         if ov > best_ov:
             best_spk, best_ov = spk, ov
     return best_spk
+
+
+# ── Role name normalization ────────────────────────────────────────────────────
+
+def normalize_role(role: str) -> str:
+    """Canonical comparison form: lowercase, spaces (no underscores).
+
+    Use this for all role comparisons inside the pipeline so that
+    'plague_doctor', 'Plague Doctor', and 'plague doctor' all compare equal.
+    """
+    return str(role).strip().lower().replace("_", " ")
+
+
+def display_role(role: str) -> str:
+    """Canonical storage/display form: Title Case, spaces.
+
+    Use this when writing role names to CSV files or the database so that
+    'plague_doctor' → 'Plague Doctor' consistently everywhere.
+    """
+    return normalize_role(role).title()

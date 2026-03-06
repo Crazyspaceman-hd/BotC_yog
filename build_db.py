@@ -14,26 +14,10 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from pipeline_utils import load_player_aliases, resolve_player_name
+from pipeline_utils import load_player_aliases, resolve_player_name, display_role
+from botc_ui import _team, _ROLES as _ROLE_DATA
 
 _PLAYER_ALIASES: dict[str, str] = load_player_aliases()
-
-# ── Evil-role lookup (mirrors explore_public.py) ──────────────────────────────
-_EVIL_ROLES = {
-    # Demons
-    "imp", "ojo", "vigormortis", "no dashii", "vortox", "fang gu",
-    "al-hadikhia", "lil' monsta", "lil monsta", "pukka", "po", "lleech",
-    "shabaloth", "zombuul", "legion", "riot",
-    # Minions
-    "poisoner", "spy", "scarlet woman", "baron", "godfather", "assassin",
-    "devil's advocate", "devils advocate", "evil twin", "witch", "cerenovus",
-    "pit-hag", "pit hag", "fearmonger", "marionette", "organ grinder",
-    "mezepheles", "harpy",
-}
-
-
-def team_for(role: str) -> str:
-    return "Evil" if str(role).strip().lower() in _EVIL_ROLES else "Good"
 
 
 # ── DDL ───────────────────────────────────────────────────────────────────────
@@ -105,6 +89,15 @@ CREATE TABLE IF NOT EXISTS speaker_map (
     believed_role TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_spkmap_vid ON speaker_map(video_id);
+
+-- Canonical role registry — single source of truth for team + type.
+-- Seeded from botc_ui._ROLES on every build_db run.
+-- Use this table to JOIN against lies/roster instead of hardcoding team logic.
+CREATE TABLE IF NOT EXISTS roles (
+    name  TEXT PRIMARY KEY,  -- display name e.g. "Plague Doctor"
+    team  TEXT NOT NULL,     -- 'Good' or 'Evil'
+    type  TEXT NOT NULL      -- 'Townsfolk' | 'Outsider' | 'Minion' | 'Demon' | 'Traveller' | 'Fabled'
+);
 """
 
 
@@ -147,6 +140,14 @@ def build(db_path: Path) -> None:
     )
     print(f"  {con.execute('SELECT COUNT(*) FROM videos').fetchone()[0]} rows in videos")
 
+    # ── roles (canonical registry — re-seeded on every run) ───────────────────
+    con.execute("DELETE FROM roles")
+    con.executemany(
+        "INSERT INTO roles(name, team, type) VALUES (?, ?, ?)",
+        [(display_role(name), team, rtype) for name, (team, rtype) in _ROLE_DATA.items()],
+    )
+    print(f"  {con.execute('SELECT COUNT(*) FROM roles').fetchone()[0]} rows in roles")
+
     # ── lies, segments, roster ────────────────────────────────────────────────
     lies_total = segs_total = roster_total = 0
 
@@ -169,10 +170,10 @@ def build(db_path: Path) -> None:
                         r.get("timestamp", ""),
                         r.get("speaker", ""),
                         resolve_player_name(r.get("player_name", ""), _PLAYER_ALIASES),
-                        team_for(r.get("actual_role", "")),
-                        r.get("actual_role", "").title(),
-                        r.get("believed_role", "").title(),
-                        r.get("claimed_role", "").title(),
+                        _team(r.get("actual_role", "")),
+                        display_role(r.get("actual_role", "")),
+                        display_role(r.get("believed_role", "")),
+                        display_role(r.get("claimed_role", "")),
                         r.get("verdict", ""),
                         r.get("text", ""),
                     )
@@ -218,8 +219,8 @@ def build(db_path: Path) -> None:
                         (
                             vid,
                             resolve_player_name(p.get("name", ""), _PLAYER_ALIASES),
-                            p.get("actual_role", "").title(),
-                            p.get("believed_role", "").title(),
+                            display_role(p.get("actual_role", "")),
+                            display_role(p.get("believed_role", "")),
                             p.get("frame_time", 0.0),
                         )
                         for p in players
@@ -242,7 +243,7 @@ def build(db_path: Path) -> None:
             rows = [
                 (vid, spk,
                  resolve_player_name(ov.get("name", ""), _PLAYER_ALIASES),
-                 ov.get("actual_role", "").title(), ov.get("believed_role", "").title())
+                 display_role(ov.get("actual_role", "")), display_role(ov.get("believed_role", "")))
                 for spk, ov in overrides.items()
                 if ov.get("name")   # only store entries with a name assigned
             ]
