@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from pipeline_utils import parse_rttm, best_speaker
+
 INTRO_CUTOFF = 300.0   # seconds - only scan this window for name mismatches
 CERTAIN_THRESHOLD   = 0.85   # auto-apply substitution
 UNCERTAIN_THRESHOLD = 0.70   # flag for user review, still apply
@@ -28,30 +30,6 @@ UNCERTAIN_THRESHOLD = 0.70   # flag for user review, still apply
 
 def load_lines(path: Path) -> list[str]:
     return [l.strip() for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
-
-
-def parse_rttm(path: Path) -> list[tuple[float, float, str]]:
-    turns = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        parts = line.split()
-        if parts[0] != "SPEAKER":
-            continue
-        start = float(parts[3])
-        dur   = float(parts[4])
-        spk   = parts[7]
-        turns.append((start, start + dur, spk))
-    return turns
-
-
-def best_speaker(a: float, b: float, turns: list) -> str:
-    best_spk, best_ov = "UNKNOWN", 0.0
-    for s, e, spk in turns:
-        ov = max(0.0, min(b, e) - max(a, s))
-        if ov > best_ov:
-            best_spk, best_ov = spk, ov
-    return best_spk
 
 
 def _player_parts(players: list[str]) -> set[str]:

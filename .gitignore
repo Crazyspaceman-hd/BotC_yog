@@ -16,7 +16,11 @@ outputs/
 
 # ── Sensitive / local-only ────────────────────────────────────────────────────
 cookies.txt
+*cookies.txt
 nul
+.env
+.env.*
+!.env.example
 
 # ── Large media files (safety net) ───────────────────────────────────────────
 *.wav
@@ -29,6 +33,7 @@ nul
 # ── Backups & scratch ─────────────────────────────────────────────────────────
 _backups/
 *.bak
+logs/
 
 # ── NeMo / diarization ────────────────────────────────────────────────────────
 nemo_experiments/
@@ -36,3 +41,10 @@ nemo_experiments/
 
 # ── Streamlit cache ───────────────────────────────────────────────────────────
 .streamlit/secrets.toml
+
+# ── Generated artifacts ───────────────────────────────────────────────────────
+landing.html
+
+# ── Local tooling / IDE ────────────────────────────────────────────────────────
+.claude/
+Pictures/

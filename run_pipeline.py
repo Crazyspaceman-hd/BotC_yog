@@ -21,6 +21,7 @@ Usage:
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -110,8 +111,10 @@ def _output_exists(video_id: str, step: str) -> bool:
 
 def _ytdlp(args: list[str]) -> None:
     """Run yt-dlp, print its output live, and raise MembersOnlyError if applicable."""
+    # Use sys.executable -m yt_dlp so we always run the venv's yt-dlp,
+    # not whatever system version happens to be on PATH.
     result = subprocess.run(
-        ["yt-dlp", *args],
+        [sys.executable, "-m", "yt_dlp", *args],
         stderr=subprocess.PIPE,
         text=True,
     )
@@ -127,12 +130,29 @@ def _ytdlp(args: list[str]) -> None:
 # Step runners
 # ---------------------------------------------------------------------------
 
+def _convert_audio_pyav(src: Path, dst: Path, sample_rate: int, stereo: bool) -> None:
+    """Convert audio using PyAV + soundfile — no system ffmpeg required."""
+    import numpy as np
+    from faster_whisper.audio import decode_audio
+    import soundfile as sf
+    if stereo:
+        left, right = decode_audio(str(src), sampling_rate=sample_rate, split_stereo=True)
+        audio = np.stack([left, right], axis=1)
+    else:
+        audio = decode_audio(str(src), sampling_rate=sample_rate)
+    sf.write(str(dst), audio, sample_rate, subtype="PCM_16")
+    print(f"  [pyav] wrote {dst.name}  ({len(audio) / sample_rate:.0f}s)")
+
+
 def _run_download(video_id: str, browser: str | None) -> None:
     out_dir = Path(f"outputs/{video_id}")
     out_dir.mkdir(parents=True, exist_ok=True)
     url = _get_video_url(video_id)
     cookies = _cookie_args(browser)
-    ejs = ["--js-runtimes", "node"]
+    # Prefer full path to node so yt-dlp can solve the n-challenge even when
+    # node.exe is not on the system PATH (common on Windows).
+    _node = shutil.which("node") or r"C:\Program Files\nodejs\node.exe"
+    ejs = ["--js-runtimes", f"node:{_node}"] if Path(_node).exists() else []
 
     audio_wav = out_dir / "audio.wav"
 
@@ -154,19 +174,28 @@ def _run_download(video_id: str, browser: str | None) -> None:
     if not audio_wav.exists():
         src = existing_raw or next(out_dir.glob("audio.*"))
         print(f"  Converting {src.name} -> audio.wav ...")
-        subprocess.run(
-            ["ffmpeg", "-i", str(src), "-ar", "44100", "-ac", "2",
-             str(audio_wav), "-y"],
-            check=True,
-        )
+        if shutil.which("ffmpeg"):
+            subprocess.run(
+                ["ffmpeg", "-i", str(src), "-ar", "44100", "-ac", "2",
+                 str(audio_wav), "-y"],
+                check=True,
+            )
+        else:
+            _convert_audio_pyav(src, audio_wav, sample_rate=44100, stereo=True)
 
     audio_16k = out_dir / "audio_16k.wav"
     print("  Resampling to 16 kHz mono ...")
-    subprocess.run(
-        ["ffmpeg", "-i", str(audio_wav),
-         "-ar", "16000", "-ac", "1", str(audio_16k), "-y"],
-        check=True,
-    )
+    if shutil.which("ffmpeg"):
+        subprocess.run(
+            ["ffmpeg", "-i", str(audio_wav),
+             "-ar", "16000", "-ac", "1", str(audio_16k), "-y"],
+            check=True,
+        )
+    else:
+        _convert_audio_pyav(
+            existing_raw or next(out_dir.glob("audio.*")),
+            audio_16k, sample_rate=16000, stereo=False,
+        )
 
     print(f"  Downloading video: {url}")
     _ytdlp(["-o", str(out_dir / "video.mp4"), *cookies, *ejs, url])
@@ -259,14 +288,16 @@ def main() -> None:
         data = json.loads(PLAYLIST_JSON.read_text(encoding="utf-8"))
         pending = [
             e for e in data.get("entries", [])
-            if e.get("status") != "analyzed" and not e.get("members_only")
+            if e.get("status") != "analyzed"
+            and not e.get("members_only")
+            and not e.get("skip")
         ]
         if not pending:
-            print("Nothing to process. (All videos are either analyzed or members-only.)")
+            print("Nothing to process. (All videos are either analyzed, members-only, or skipped.)")
             return
-        members_only_count = sum(1 for e in data.get("entries", []) if e.get("members_only"))
-        if members_only_count:
-            print(f"Skipping {members_only_count} members-only video(s).")
+        skipped_count = sum(1 for e in data.get("entries", []) if e.get("members_only") or e.get("skip"))
+        if skipped_count:
+            print(f"Skipping {skipped_count} members-only/skip video(s).")
         print(f"Processing {len(pending)} video(s) with steps: {args.steps}")
         for e in pending:
             process_video(e["id"], args.steps, args.force, args.browser)

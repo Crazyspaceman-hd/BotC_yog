@@ -15,9 +15,9 @@
       "title": "A Terrifying Test - Blood on the Clocktower in Minecraft",
       "duration": 3381,
       "url": "https://www.youtube.com/watch?v=z79AJOPoNi4",
-      "status": "pending",
+      "status": "analyzed",
       "members": false,
-      "members_only": true
+      "winner": "Good"
     },
     {
       "id": "sitpjTGSDhs",
@@ -70,7 +70,7 @@
       "duration": 4290,
       "url": "https://www.youtube.com/watch?v=oN0pdPoVGhY",
       "status": "analyzed",
-      "winner": null,
+      "winner": "Evil",
       "members": false
     },
     {
@@ -80,7 +80,9 @@
       "url": "https://www.youtube.com/watch?v=OYTaTtjk3ac",
       "status": "pending",
       "members_only": true,
-      "members": true
+      "members": true,
+      "skip": true,
+      "skip_reason": "meta/tutorial video - not a real game"
     },
     {
       "id": "JiUp8l3tf6w",
@@ -132,9 +134,12 @@
       "title": "Lewis is finally a player! | Blood on the Clocktower in Minecraft Bonus",
       "duration": 2425,
       "url": "https://www.youtube.com/watch?v=tf_LO5NKKUU",
-      "status": "pending",
+      "status": "analyzed",
       "members_only": true,
-      "members": true
+      "members": true,
+      "needs_manual_st": true,
+      "winner": "Good",
+      "num_speakers": 8
     },
     {
       "id": "WfGn_RCZlfA",
@@ -150,9 +155,11 @@
       "title": "Nilesy's annoying wish | Blood on the Clocktower in Minecraft Bonus",
       "duration": 4835,
       "url": "https://www.youtube.com/watch?v=HQlYPDUfM4Q",
-      "status": "pending",
+      "status": "analyzed",
       "members_only": true,
-      "members": true
+      "members": true,
+      "winner": "Evil",
+      "num_speakers": 8
     },
     {
       "id": "-Ejl5ODVNg0",
@@ -169,7 +176,7 @@
       "duration": 4154,
       "url": "https://www.youtube.com/watch?v=X4OKDJ3XBuU",
       "status": "analyzed",
-      "winner": null,
+      "winner": "Good",
       "members": false
     },
     {
@@ -186,9 +193,10 @@
       "title": "Oops, all Lunatics | Blood on the Clocktower Bonus",
       "duration": 3930,
       "url": "https://www.youtube.com/watch?v=DAb9sq5ku2k",
-      "status": "downloaded",
+      "status": "analyzed",
       "members_only": true,
-      "members": true
+      "members": true,
+      "winner": "Evil"
     },
     {
       "id": "uqSFiznniIQ",
@@ -222,9 +230,10 @@
       "title": "Zylus's Evil Grandchild | Blood on the Clocktower Bonus",
       "duration": 3918,
       "url": "https://www.youtube.com/watch?v=F2f0nNeoWQM",
-      "status": "pending",
+      "status": "analyzed",
       "members_only": true,
-      "members": true
+      "members": true,
+      "winner": "Good"
     },
     {
       "id": "BBX14ec_Y1Q",
@@ -249,9 +258,10 @@
       "title": "No one knows their roles! | Blood on the Clocktower Bonus",
       "duration": 4857,
       "url": "https://www.youtube.com/watch?v=d2M-N5iABRo",
-      "status": "pending",
+      "status": "analyzed",
       "members_only": true,
-      "members": true
+      "members": true,
+      "blind": true
     },
     {
       "id": "uiL6EjemKD0",
@@ -268,7 +278,7 @@
       "duration": 4853,
       "url": "https://www.youtube.com/watch?v=Y7_Tvnd3jDs",
       "status": "analyzed",
-      "winner": null,
+      "winner": "Good",
       "members": false
     },
     {
@@ -278,7 +288,8 @@
       "url": "https://www.youtube.com/watch?v=ggM9BH__xtU",
       "status": "analyzed",
       "winner": null,
-      "members": false
+      "members": false,
+      "blind": true
     },
     {
       "id": "GopTiY65CC0",
@@ -358,7 +369,7 @@
       "duration": 2917,
       "url": "https://www.youtube.com/watch?v=FVhHMIRhkmY",
       "status": "analyzed",
-      "winner": null,
+      "winner": "Good",
       "members": false
     },
     {
@@ -376,7 +387,7 @@
       "duration": 3876,
       "url": "https://www.youtube.com/watch?v=nZ4CPKMrCnY",
       "status": "analyzed",
-      "winner": null,
+      "winner": "Good",
       "members": false
     },
     {
@@ -412,7 +423,7 @@
       "duration": 2801,
       "url": "https://www.youtube.com/watch?v=MUoCe_9boaw",
       "status": "analyzed",
-      "winner": null,
+      "winner": "Evil",
       "members": false
     },
     {
@@ -431,7 +442,7 @@
       "url": "https://www.youtube.com/watch?v=OPqWyO7h-wM",
       "status": "analyzed",
       "members": false,
-      "winner": null
+      "winner": "Good"
     },
     {
       "id": "QbzFmlScLSA",
@@ -448,7 +459,7 @@
       "duration": 4048,
       "url": "https://www.youtube.com/watch?v=duo_5mvu_a4",
       "status": "analyzed",
-      "winner": null,
+      "winner": "Good",
       "members": false
     },
     {
@@ -467,15 +478,25 @@
       "url": "https://www.youtube.com/watch?v=nPAdvl7pySg",
       "status": "analyzed",
       "winner": "Good",
-      "members": false
+      "members": false,
+      "blind": true
     },
     {
       "id": "DbF9CPOueTI",
       "title": "Sips joins the Farmers Alliance - Blood on the Clocktower in Minecraft",
       "duration": 4675,
       "url": "https://www.youtube.com/watch?v=DbF9CPOueTI",
+      "status": "analyzed",
+      "members": false,
+      "winner": null
+    },
+    {
+      "id": "OaAUvM4SAkg",
+      "title": "Tom the Puppet Master - Blood on the Clocktower in Minecraft",
+      "duration": 4116,
+      "url": "https://www.youtube.com/watch?v=OaAUvM4SAkg",
       "status": "pending",
-      "members": false
+      "members_only": true
     }
   ]
 }

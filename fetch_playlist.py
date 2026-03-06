@@ -79,15 +79,55 @@ def main() -> None:
             "Example: python fetch_playlist.py --url 'https://www.youtube.com/playlist?list=...'"
         )
 
-    entries = fetch_entries(url)
+    # Load existing entries so we can preserve curated flags
+    # (winner, blind, members_only, skip, skip_reason, num_speakers, needs_manual_st, etc.)
+    existing_by_id: dict[str, dict] = {}
+    if PLAYLIST_JSON.exists():
+        existing_data = json.loads(PLAYLIST_JSON.read_text(encoding="utf-8"))
+        for e in existing_data.get("entries", []):
+            existing_by_id[e["id"]] = e
 
-    # Compute status for each entry
-    for e in entries:
-        e["status"] = compute_status(e["id"])
+    fetched_entries = fetch_entries(url)
+
+    # Fields that yt-dlp provides — always overwrite these from the fresh fetch
+    YT_FIELDS = {"id", "title", "duration", "url"}
+    # Fields managed by us — never overwrite, only set on new entries
+    CURATED_FIELDS = {"winner", "blind", "members_only", "skip", "skip_reason",
+                      "num_speakers", "needs_manual_st", "status"}
+
+    merged: list[dict] = []
+    new_count = 0
+    for fe in fetched_entries:
+        vid = fe["id"]
+        if vid in existing_by_id:
+            # Start from existing entry (preserves all curated flags)
+            entry = dict(existing_by_id[vid])
+            # Update only the yt-dlp-sourced fields
+            for k in YT_FIELDS:
+                if k in fe:
+                    entry[k] = fe[k]
+        else:
+            # Brand-new video — no curated data yet
+            entry = dict(fe)
+            new_count += 1
+            print(f"  NEW: {vid}  {fe.get('title', '')[:60]}")
+
+        # Always recompute status from filesystem
+        entry["status"] = compute_status(vid)
+        merged.append(entry)
+
+    # Preserve any existing entries NOT returned by YouTube
+    # (members-only / unlisted videos that yt-dlp can't see without auth)
+    fetched_ids = {fe["id"] for fe in fetched_entries}
+    for vid, existing_entry in existing_by_id.items():
+        if vid not in fetched_ids:
+            existing_entry["status"] = compute_status(vid)
+            merged.append(existing_entry)
+            print(f"  KEPT (not in playlist fetch): {vid}  {existing_entry.get('title', '')[:50]}")
 
     output = {
         "playlist_url": url,
-        "entries": entries,
+        "entries": merged,
     }
     PLAYLIST_JSON.write_text(json.dumps(output, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -98,14 +138,14 @@ def main() -> None:
     header = f"{'ID':<{col_id}} {'Status':<{col_stat}} {'Title'}"
     print(f"\n{header}")
     print("-" * (col_id + col_stat + col_title + 2))
-    for e in entries:
-        title = (e["title"] or "(no title)")[:col_title]
-        print(f"{e['id']:<{col_id}} {e['status']:<{col_stat}} {title}")
+    for e in merged:
+        title = (e.get("title") or "(no title)")[:col_title]
+        print(f"{e['id']:<{col_id}} {e.get('status',''):<{col_stat}} {title}")
 
-    print(f"\nTotal: {len(entries)} entries. Written to {PLAYLIST_JSON}")
+    print(f"\nTotal: {len(merged)} entries ({new_count} new). Written to {PLAYLIST_JSON}")
     status_counts: dict[str, int] = {}
-    for e in entries:
-        status_counts[e["status"]] = status_counts.get(e["status"], 0) + 1
+    for e in merged:
+        status_counts[e.get("status", "unknown")] = status_counts.get(e.get("status", "unknown"), 0) + 1
     for s, n in sorted(status_counts.items()):
         print(f"  {s}: {n}")
 

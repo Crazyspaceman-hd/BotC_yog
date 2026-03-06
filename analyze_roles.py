@@ -29,8 +29,26 @@ import json
 import re
 from pathlib import Path
 
+from pipeline_utils import parse_rttm, load_player_aliases, resolve_player_name, normalize_role
+
 INTRO_CUTOFF   = 300.0        # seconds — used to build the initial roster
 STORYTELLER_ID = "speaker_0"  # diarization always assigns lead voice to spk_0
+
+# ── Blind-game set (loaded once at startup) ───────────────────────────────────
+def _load_blind_vids() -> set[str]:
+    """Return set of video IDs marked as 'blind' in playlist.json."""
+    p = Path("playlist.json")
+    if not p.exists():
+        return set()
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        entries = data if isinstance(data, list) else data.get("entries", [])
+        return {e["id"] for e in entries if e.get("blind")}
+    except Exception:
+        return set()
+
+_BLIND_VIDS: set[str] = _load_blind_vids()
+_PLAYER_ALIASES: dict[str, str] = load_player_aliases()
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -56,19 +74,6 @@ def load_segments(path: Path) -> list[dict]:
                 "text":    row["text"],
             })
     return rows
-
-
-def parse_rttm(path: Path) -> list[tuple[float, float, str]]:
-    turns = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        p = line.split()
-        if p[0] != "SPEAKER":
-            continue
-        start = float(p[3])
-        turns.append((start, start + float(p[4]), p[7]))
-    return turns
 
 
 def speaker_at(t: float, turns: list[tuple[float, float, str]]) -> str:
@@ -297,14 +302,16 @@ def load_intro_roster(out_dir: Path) -> dict[str, dict]:
 
     result: dict[str, dict] = {}
     for p in data.get("players", []):
-        name = (p.get("name") or "").strip()
-        if name:
-            result[name.lower()] = {
-                "name":          name,
-                "believed_role": p.get("believed_role", "unknown").lower(),
-                "actual_role":   p.get("actual_role",   "unknown").lower(),
-                "frame_time":    p.get("frame_time", 0.0),
-            }
+        raw_name = (p.get("name") or "").strip()
+        if not raw_name:
+            continue
+        name = resolve_player_name(raw_name, _PLAYER_ALIASES)
+        result[name.lower()] = {
+            "name":          name,
+            "believed_role": p.get("believed_role", "unknown").lower(),
+            "actual_role":   p.get("actual_role",   "unknown").lower(),
+            "frame_time":    p.get("frame_time", 0.0),
+        }
     return result
 
 
@@ -602,17 +609,26 @@ def scan_for_lies(
             continue
 
         info = roster.get(speaker)
+        # Skip ANY speaker mapped as Storyteller (diarization may assign the
+        # Storyteller to non-speaker_0 IDs; auto_assign_speakers also does this)
+        if info and (info.get("is_storyteller")
+                     or info.get("actual_role") == "storyteller"
+                     or info.get("name", "").lower() == "storyteller"):
+            continue
+
         player_name = info["name"]   if info else speaker
         believed_at, actual_at = get_role_at(speaker, seg["start"], roster)
 
         for m in role_claim_re.finditer(seg["text"]):
-            claimed = next(v for v in m.groupdict().values() if v).lower()
+            claimed       = normalize_role(next(v for v in m.groupdict().values() if v))
+            actual_norm   = normalize_role(actual_at)
+            believed_norm = normalize_role(believed_at)
 
-            if actual_at == "unknown":
+            if actual_norm == "unknown":
                 verdict = "UNVERIFIED"
-            elif claimed == actual_at:
+            elif claimed == actual_norm:
                 verdict = "TRUE"
-            elif claimed == believed_at and believed_at != actual_at:
+            elif claimed == believed_norm and believed_norm != actual_norm:
                 verdict = "HONEST MISTAKE"
             else:
                 verdict = "LIE"
@@ -621,9 +637,9 @@ def scan_for_lies(
                 "timestamp":    fmt_ts(seg["start"]),
                 "speaker":      speaker,
                 "player_name":  player_name,
-                "actual_role":  actual_at,
-                "believed_role": believed_at,
-                "claimed_role": claimed,
+                "actual_role":  actual_norm,    # normalized: lowercase, spaces
+                "believed_role": believed_norm, # normalized: lowercase, spaces
+                "claimed_role": claimed,        # already normalize_role()'d above
                 "verdict":      verdict,
                 "text":         seg["text"],
             })
@@ -657,6 +673,19 @@ def main(video_id: str = "lF96Jd3Eaeg") -> None:
     segments   = load_segments(segments_csv)
     rttm_turns = parse_rttm(rttm) if rttm.exists() else []
     print(f"Loaded {len(segments)} segments\n")
+
+    # ── Blind game: skip lie detection entirely ────────────────────────────────
+    if video_id in _BLIND_VIDS:
+        print("[blind game] Players didn't know their roles — skipping lie detection.")
+        lie_csv.parent.mkdir(parents=True, exist_ok=True)
+        fieldnames = [
+            "timestamp", "speaker", "player_name",
+            "actual_role", "believed_role", "claimed_role", "verdict", "text",
+        ]
+        with lie_csv.open("w", newline="", encoding="utf-8") as f:
+            csv.DictWriter(f, fieldnames=fieldnames).writeheader()
+        print(f"Wrote empty lie_analysis.csv -> {lie_csv}")
+        return
 
     # ── A: build transcript-based roster ──────────────────────────────────────
     print("Building intro roster from transcript ...")
@@ -695,9 +724,11 @@ def main(video_id: str = "lF96Jd3Eaeg") -> None:
         overrides = json.loads(overrides_file.read_text(encoding="utf-8"))
         n_applied = 0
         for spk, info in overrides.items():
-            name = info.get("name", "")
-            if not name or name == spk:
+            raw_name = info.get("name", "")
+            if not raw_name or raw_name == spk:
                 continue
+            name = resolve_player_name(raw_name, _PLAYER_ALIASES)
+            is_st = name.lower() == "storyteller"
             roster[spk] = {
                 "name":               name,
                 "believed_role":      (info.get("believed_role") or "unknown").lower(),
@@ -707,6 +738,7 @@ def main(video_id: str = "lF96Jd3Eaeg") -> None:
                                         info.get("believed_role") or "unknown").lower(),
                 "role_history":       [],
                 "source":             "manual",
+                "is_storyteller":     is_st,
             }
             n_applied += 1
         if n_applied:
