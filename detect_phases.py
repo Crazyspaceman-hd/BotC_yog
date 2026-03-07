@@ -91,6 +91,35 @@ ALLOWED_TRANSITIONS: dict[str, list[str]] = {
 # This prevents single-event flips on noisy or low-evidence intervals.
 INERTIA_BONUS = 0.15
 
+# Reduced inertia bonus for phase-exit boundaries: when a STRONG cue targets
+# a well-known phase boundary (Night→Day, Nomination→Execution, etc.) the
+# regular INERTIA_BONUS can suppress an obvious exit signal if nearby
+# in-phase evidence keeps cur_sc elevated.  INERTIA_BONUS_EXIT allows the
+# exit signal to win over mild staying evidence without eliminating inertia
+# entirely.
+INERTIA_BONUS_EXIT = 0.02
+
+# Phase pairs for which INERTIA_BONUS_EXIT applies when best candidate has a
+# strong cue.  These cover the sticky boundaries where in-phase evidence
+# commonly competes with legitimate exit announcements.
+_EXIT_INERTIA_PAIRS: frozenset[tuple[str, str]] = frozenset({
+    ("Night",      "Day"),
+    ("Night",      "Nomination"),
+    ("Nomination", "Execution"),
+    ("Execution",  "Night"),
+    ("Execution",  "Day"),
+})
+
+# Transitions that require strong evidence to fire.  Weak cues (player
+# chatter, incidental phrases) will not trigger these even if they
+# accumulate above MIN_SCORE_WEAK.  This prevents in-phase ST commentary
+# (e.g. "good morning" addressed to a player mid-Nomination) from
+# prematurely resetting a phase.  Strong cues such as "welcome back to
+# town" or "no one died" still trigger them normally.
+_STRONG_ONLY_TRANSITIONS: frozenset[tuple[str, str]] = frozenset({
+    ("Nomination", "Day"),   # needs explicit ST day-boundary announcement
+})
+
 # Soft timeout for the Nomination phase.  If we have been in Nomination for
 # longer than MAX_NOMINATION_S with no fresh nomination evidence in the last
 # NOMINATION_REFRESH_S, suppress Nomination from the candidate pool so the
@@ -150,6 +179,17 @@ _sig(r"\bday (?:one|two|three|four|five|six|seven|eight|nine|\d+)\b",
 _sig(r"\brise and shine\b",                              "Day",   0.8, st=True,  strong=True)
 _sig(r"\bgood morning\b",                                "Day",   0.5, st=True,  strong=False)
 _sig(r"\bwake up\b",                                     "Day",   0.4, st=True,  strong=False)
+# Phase-exit cues: mark the Night → Day boundary specifically.
+# "welcome back to town" is the canonical Yogscast BotC day-start phrase (ST).
+# "last night" and "overnight" accumulate from players discussing night outcomes
+# and fire once multiple speakers mention them within the context window.
+# "the night is over" and "dawn breaks" are any-speaker explicit announcements.
+_sig(r"\bwelcome back to town\b",                        "Day",   0.9, st=True,  strong=True)
+_sig(r"\bthe night(?:'s| is| was) over\b",               "Day",   0.9, st=False, strong=True)
+_sig(r"\bdawn (?:breaks?|has (?:come|broken))\b",        "Day",   0.8, st=True,  strong=True)
+_sig(r"\bit(?:'s| is) (?:now )?(?:the )?morning\b",      "Day",   0.8, st=True,  strong=True)
+_sig(r"\blast night\b",                                  "Day",   0.35, st=False, strong=False)
+_sig(r"\bovernight\b",                                   "Day",   0.30, st=False, strong=False)
 
 # ── Nomination ─────────────────────────────────────────────────────────────────
 # Strong: ST procedural cues
@@ -170,6 +210,10 @@ _sig(r"\bexecution (?:is )?complete\b",                  "Execution", 0.9, st=Tr
 _sig(r"\bput to death\b",                                "Execution", 0.8, st=True,  strong=True)
 _sig(r"\bthe vote (?:passed|carries)\b",                 "Execution", 0.7, st=True,  strong=True)
 _sig(r"\bis now dead\b",                                 "Execution", 0.8, st=True,  strong=True)
+# Phase-exit cues: mark Nomination → Execution boundary from any speaker.
+# Players commonly announce the vote outcome before the ST formalises it.
+_sig(r"\bvoted (?:out|off)\b",                           "Execution", 0.8, st=False, strong=True)
+_sig(r"\bgets? (?:executed|the axe)\b",                  "Execution", 0.8, st=True,  strong=True)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -351,20 +395,46 @@ def _apply_state_machine(
         # ── Post-intro state machine ──────────────────────────────────────────
         # Find the best legal candidate phase from ALLOWED_TRANSITIONS.
         allowed_nexts = ALLOWED_TRANSITIONS.get(current_phase, [])
-        best_cand = None
-        best_sc   = 0.0
-        best_ev   = ""
+        best_cand   = None
+        best_sc     = 0.0
+        best_ev     = ""
+        best_strong = False   # whether the best candidate has a strong cue
         for ph in allowed_nexts:
             if ph not in scores:
                 continue
             sc, has_strong, ev = scores[ph]
             min_s = MIN_SCORE_STRONG if has_strong else MIN_SCORE_WEAK
             if sc >= min_s and sc > best_sc:
-                best_cand, best_sc, best_ev = ph, sc, ev
+                best_cand, best_sc, best_ev, best_strong = ph, sc, ev, has_strong
+
+        # Enforce strong-only constraint on certain transitions.
+        # Some phase exits (e.g. Nomination→Day) must not be triggered by weak
+        # cues alone (e.g. ST saying "good morning" to a player mid-Nomination).
+        # Only a STRONG cue — an unambiguous boundary announcement such as
+        # "welcome back to town" or "nobody died" — may fire these transitions.
+        if (best_cand is not None
+                and not best_strong
+                and (current_phase, best_cand) in _STRONG_ONLY_TRANSITIONS):
+            best_cand   = None
+            best_sc     = 0.0
+            best_ev     = ""
+            best_strong = False
 
         # Current phase score (raw, before inertia bonus).
         cur_sc, _cur_strong, cur_ev = scores.get(current_phase, (0.0, False, ""))
-        inertia = cur_sc + INERTIA_BONUS
+
+        # Choose the inertia bonus.
+        # For known phase-exit boundaries where a STRONG candidate exists,
+        # use INERTIA_BONUS_EXIT (≈0) so that nearby in-phase evidence
+        # (e.g. Night cues from ongoing resolution) cannot suppress an
+        # obvious exit announcement (e.g. "welcome back to town" = Day start).
+        # For all other cases keep INERTIA_BONUS to prevent noisy flips.
+        is_exit_boundary = (
+            best_strong
+            and best_cand is not None
+            and (current_phase, best_cand) in _EXIT_INERTIA_PAIRS
+        )
+        inertia = cur_sc + (INERTIA_BONUS_EXIT if is_exit_boundary else INERTIA_BONUS)
 
         if best_cand is not None and best_sc > inertia:
             # ── Switch ────────────────────────────────────────────────────────
