@@ -1,4 +1,4 @@
-"""speaker_consistency.py — N1: Episode-local speaker consistency.
+"""speaker_consistency.py — N1 (speaker_consistency): Episode-local speaker consistency.
 
 Smooths intra-episode diarization fragmentation without creating cross-episode
 voice identities.  Reads the raw RTTM diarization alongside the merged segment
@@ -209,7 +209,7 @@ def main(video_id: str,
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(
-        description="Episode-local speaker consistency smoothing (N1)")
+        description="Episode-local speaker consistency smoothing (N1 / speaker_consistency)")
     ap.add_argument("video_id",
                     help="YouTube video ID (e.g. sitpjTGSDhs)")
     ap.add_argument("--min-flip-s", type=float, default=DEFAULT_MIN_FLIP_S,

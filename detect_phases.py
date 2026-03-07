@@ -1,4 +1,4 @@
-"""detect_phases.py — N2: Game-phase boundary detection (state-machine edition).
+"""detect_phases.py — N2 (phase_detection): Game-phase boundary detection (state-machine edition).
 
 Reads segments_consistent.csv (or segments_patched.csv / segments.csv) and
 produces phase_labels.csv labelling each interval of the episode as one of:
@@ -694,7 +694,7 @@ def main(video_id: str, force: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="Game-phase boundary detection (N2)")
+    ap = argparse.ArgumentParser(description="Game-phase boundary detection (N2 / phase_detection)")
     ap.add_argument("video_id", help="YouTube video ID")
     ap.add_argument("--force", action="store_true", help="Overwrite existing output")
     args = ap.parse_args()

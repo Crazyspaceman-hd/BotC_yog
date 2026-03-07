@@ -115,6 +115,41 @@ E/F+overrides ──► G. video.analyze
 
 ---
 
+## Game Phases vs. Events
+
+The pipeline distinguishes between **phases** (broad temporal regions of a game) and
+**events** (discrete occurrences within those regions).
+
+**Major phases** — produced by N2 (phase_detection / `detect_phases.py`):
+
+| Phase | Description |
+|-------|-------------|
+| `Intro` | Pre-game: players announce roles; Storyteller assigns night abilities |
+| `Night` | Players close eyes; Storyteller resolves night actions privately |
+| `Day` | Open discussion; players talk, share information, accuse |
+| `Nomination` | A player is nominated; the group votes on whether to execute |
+| `Execution` | Storyteller announces the execution outcome |
+
+> **Design note:** `Town` is not a phase label in the code.  The open-discussion
+> period is labelled `Day`.  `Nomination` and `Execution` are sub-phases of what
+> a player would informally call "Town meeting."
+
+**Events inside phases** — produced by N3 (claim_extraction / `extract_claims.py`):
+
+| Event | Typical phase | Description |
+|-------|--------------|-------------|
+| `nomination` | Nomination | A player nominates another for execution |
+| `vote` | Nomination | A player casts a yes/no vote |
+| `execution` | Execution | ST announces result; player dies or survives |
+| `death` | Night / Execution | A player is removed from the game |
+| `role_claim` | Day / Night | A player claims (or implies) a role |
+| `accusation` | Day / Nomination | A player accuses another of being Evil |
+
+Phase labels from N2 are consumed by N3 to provide temporal context for event
+extraction (e.g. a role claim in Day has different weight than one at Night).
+
+---
+
 ## Node Definitions
 
 ### A.0 playlist.fetch

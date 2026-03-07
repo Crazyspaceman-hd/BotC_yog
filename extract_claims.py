@@ -1,4 +1,4 @@
-"""extract_claims.py — N3: Claim / suspicion propagation tracking.
+"""extract_claims.py — N3 (claim_extraction): Claim / suspicion propagation tracking.
 
 Extracts conversational events from the transcript:
 
@@ -475,7 +475,7 @@ def main(video_id: str, force: bool = False) -> None:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(
-        description="Claim / suspicion propagation tracking (N3)")
+        description="Claim / suspicion propagation tracking (N3 / claim_extraction)")
     ap.add_argument("video_id", help="YouTube video ID")
     ap.add_argument("--force", action="store_true",
                     help="Overwrite existing output files")

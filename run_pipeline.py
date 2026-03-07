@@ -33,7 +33,7 @@ PLAYLIST_JSON = Path("playlist.json")
 
 ALL_STEPS = ["download", "transcribe", "diarize", "merge", "patch", "scrape", "analyze"]
 
-# Optional enrichment steps (N1/N2/N3) — not run by default, not part of
+# Optional enrichment steps (N1 speaker_consistency / N2 phase_detection / N3 claim_extraction) — not run by default, not part of
 # playlist.json status machine, do not block existing pipeline.
 ENRICH_STEPS = ["consistency", "phases", "claims"]
 
@@ -243,7 +243,7 @@ def _run_step(step: str, video_id: str, force: bool, browser: str | None = None)
         import analyze_roles
         analyze_roles.main(video_id)
 
-    # ── Optional enrichment steps (N1/N2/N3) ──────────────────────────────
+    # ── Optional enrichment steps (N1 speaker_consistency / N2 phase_detection / N3 claim_extraction) ─
     elif step == "consistency":
         import speaker_consistency
         speaker_consistency.main(video_id, force=force)
