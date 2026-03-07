@@ -131,6 +131,26 @@ _STRONG_ONLY_TRANSITIONS: frozenset[tuple[str, str]] = frozenset({
 MAX_NOMINATION_S     = 480.0   # 8 minutes
 NOMINATION_REFRESH_S = 120.0   # 2-minute freshness window
 
+# ── Cue-cluster constants ──────────────────────────────────────────────────────
+# When a _FROM_NIGHT_ONLY restricted Day cue (e.g. "welcome back to town") co-
+# occurs with explicit death-confirmation language during Nomination, the
+# combination strongly implies an execution just resolved and Day has resumed.
+# Injecting CUE_CLUSTER_BONUS into Day (marked strong) lets the restricted cue
+# still drive Nomination→Day without relaxing the source-phase restriction that
+# prevents the false-fire regression in DzTk6kSIg-M.
+CUE_CLUSTER_BONUS = 0.30
+
+_DEATH_LANGUAGE_RE: re.Pattern = re.compile(
+    r"\b(?:"
+    r"you died"
+    r"|(?:he|she|they|it)(?:'s| is| was) (?:now )?dead"
+    r"|i(?:'m| am) (?:now )?dead"
+    r"|(?:has|have) been (?:killed|executed)"
+    r"|there(?:'s| is| was| has been) a death"
+    r")\b",
+    re.I,
+)
+
 # ── Signal table ───────────────────────────────────────────────────────────────
 # Each entry is a tuple:
 #   (pattern, target_phase, weight, storyteller_only, strong, allowed_source_phases)
@@ -477,6 +497,36 @@ def _apply_state_machine(
             )
             if not nomination_is_fresh:
                 phase_scores.pop("Nomination", None)
+
+        # ── Cue-cluster: restricted Day cue + death reveal → Nomination→Day ──
+        # "welcome back to town" et al. are _FROM_NIGHT_ONLY to block the
+        # DzTk6kSIg-M false-fire (casual mid-Nomination use with no death).
+        # When the phrase co-occurs with death-confirmation language (e.g.
+        # "you died" / "I'm dead") the combination marks a genuine execution
+        # reveal; inject CUE_CLUSTER_BONUS so Day can still win (e.g. _EGJi3wg0bE).
+        if current_phase == "Nomination":
+            restricted_day_cue_nearby = any(
+                trig[1] == "Day"
+                and trig[5] is not None
+                and current_phase not in trig[5]
+                and abs(interval_mid - trig[0]) <= CONTEXT_S
+                for trig in raw_triggers
+            )
+            if restricted_day_cue_nearby:
+                death_reveal_nearby = any(
+                    _DEATH_LANGUAGE_RE.search(row["text"])
+                    for row in rows
+                    if abs(interval_mid - float(row["start"])) <= CONTEXT_S
+                )
+                if death_reveal_nearby:
+                    existing_sc, _, existing_ev = phase_scores.get(
+                        "Day", (0.0, False, "")
+                    )
+                    phase_scores["Day"] = (
+                        existing_sc + CUE_CLUSTER_BONUS,
+                        True,
+                        existing_ev or "co-occurrence: day-start cue + death reveal",
+                    )
 
         # ── Intro window: fully locked until INTRO_CUTOFF_S ──────────────────
         # Intro is treated as a fixed block; no phase transitions are evaluated
