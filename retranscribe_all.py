@@ -20,6 +20,7 @@ Usage:
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -84,8 +85,14 @@ def main() -> None:
 
     print()
 
-    # Import here so a dry-run doesn't need the full env
-    from run_pipeline import process_video
+    # Each video is run as a subprocess so that the WhisperModel CUDA allocator
+    # gets a clean VRAM state per video.  In-process calls share one process
+    # address space: after the first transcription the GPU memory from the model
+    # is not guaranteed to be freed before the next WhisperModel.__init__ fires,
+    # which causes a C-level OOM that kills the whole process — not a Python
+    # exception, so try/except can't catch it.  A subprocess exits cleanly and
+    # the OS reclaims all VRAM before the next video starts.
+    cmd_base = [sys.executable, "run_pipeline.py", "--steps"] + STEPS + ["--force"]
 
     failed = []
     for i, (vid, members, blind) in enumerate(to_process, 1):
@@ -93,12 +100,13 @@ def main() -> None:
         print(f"[{i}/{len(to_process)}] {vid}"
               + (" (members)" if members else "")
               + (" (blind)" if blind else ""))
-        print(f"{'='*60}")
-        try:
-            process_video(vid, STEPS, force=True)
-        except Exception as exc:
-            print(f"ERROR processing {vid}: {exc}")
-            failed.append((vid, str(exc)))
+        print(f"{'='*60}", flush=True)
+        result = subprocess.run(cmd_base + [vid])
+        if result.returncode != 0:
+            print(f"ERROR: {vid} exited with code {result.returncode}")
+            failed.append((vid, f"exit code {result.returncode}"))
+        else:
+            print(f"OK: {vid}")
 
     print(f"\n{'='*60}")
     print(f"Done. Processed {len(to_process) - len(failed)}/{len(to_process)} videos.")
