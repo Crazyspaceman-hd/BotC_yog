@@ -131,6 +131,23 @@ _STRONG_ONLY_TRANSITIONS: frozenset[tuple[str, str]] = frozenset({
 MAX_NOMINATION_S     = 480.0   # 8 minutes
 NOMINATION_REFRESH_S = 120.0   # 2-minute freshness window
 
+# ── Structural (speaker-pattern) signal constants ─────────────────────────────
+# Structural triggers are generated from speaker-count patterns in the segment
+# data and added to all_triggers alongside keyword triggers.  They provide a
+# phase signal even when the storyteller uses non-standard phrasing, eliminating
+# the "no keywords → pure inertia" failure mode.
+#
+# Sampling math (CONTEXT_S=20, STRUCT_STEP_S=15):
+#   At any interval_mid the 3 nearest structural samples (at t-15, t, t+15)
+#   contribute weight × (0.25 + 1.0 + 0.25) = weight × 1.5 after decay.
+#   Night: 0.30 × 1.5 = 0.45  ≥  MIN_SCORE_WEAK (0.40) — fires after ~30s
+#   Day:   0.25 × 1.5 = 0.375 — combines with keyword Day signals to exceed 0.40
+#   A single isolated structural trigger (0.30) stays below MIN_SCORE_WEAK and
+#   cannot flip the machine alone; MIN_PHASE_S=30s absorbs any remaining islands.
+STRUCT_STEP_S  = 15.0   # sampling interval for structural trigger generation (s)
+STRUCT_NIGHT_W = 0.30   # Night trigger weight: ST + 1 player window
+STRUCT_DAY_W   = 0.25   # Day trigger weight: ≥2 non-ST speakers in window
+
 # ── Cue-cluster constants ──────────────────────────────────────────────────────
 # When a _FROM_NIGHT_ONLY restricted Day cue (e.g. "welcome back to town") co-
 # occurs with explicit death-confirmation language during Nomination, the
@@ -399,6 +416,76 @@ def _score_window(
         )
         for phase in phase_scores
     }
+
+
+# ── Structural speaker-pattern helpers ────────────────────────────────────────
+
+def _speakers_in_window(
+    t: float,
+    rows: list[dict],
+    half_window_s: float,
+) -> set[str]:
+    """Unique speaker IDs whose segment overlaps [t - half_window, t + half_window]."""
+    return {
+        row["speaker"]
+        for row in rows
+        if float(row["start"]) < t + half_window_s
+        and float(row["end"]) > t - half_window_s
+    }
+
+
+def _structural_triggers(
+    rows: list[dict],
+    storyteller_id: str | None,
+    video_duration_s: float,
+) -> list[_Trigger]:
+    """Generate phase-vote triggers from speaker-count patterns in segment data.
+
+    Sampled every STRUCT_STEP_S seconds starting from t=0.  Triggers land in
+    all_triggers (not storyteller_triggers) so they are automatically suppressed
+    within the intro window by the `raw_triggers` selection in the state machine.
+
+    Two patterns are detected:
+
+      Night  — exactly 2 speakers active (ST + 1 player, 1:1 consultation).
+               Sustained Night phases accumulate well above MIN_SCORE_WEAK;
+               brief mid-Day 1:1 chat (<30 s) scores below the threshold and
+               is absorbed by MIN_PHASE_S even if it briefly wins.
+
+      Day    — ≥2 non-ST speakers active (group discussion / side convos).
+               Combines with keyword Day signals; on its own (0.375) is just
+               below MIN_SCORE_WEAK, so a minimal Day keyword cue is still
+               needed to confirm the transition.
+
+    Nomination/Execution are not targeted here; both phases look like large
+    multi-speaker windows and are better distinguished by keyword signals.
+    """
+    if not storyteller_id:
+        return []
+    triggers: list[_Trigger] = []
+    t = 0.0
+    while t <= video_duration_s:
+        active   = _speakers_in_window(t, rows, STRUCT_STEP_S)
+        n_total  = len(active)
+        st_here  = storyteller_id in active
+        n_non_st = n_total - (1 if st_here else 0)
+
+        if n_total == 2 and st_here:
+            triggers.append((
+                t, "Night", STRUCT_NIGHT_W,
+                "structural: 2-speaker window (ST + 1 player)",
+                False, None,
+            ))
+
+        if n_non_st >= 2:
+            triggers.append((
+                t, "Day", STRUCT_DAY_W,
+                f"structural: {n_non_st} non-ST speakers in window",
+                False, None,
+            ))
+
+        t += STRUCT_STEP_S
+    return triggers
 
 
 # ── State machine ──────────────────────────────────────────────────────────────
@@ -702,9 +789,20 @@ def main(video_id: str, force: bool = False) -> None:
     print(f"  Storyteller speaker: {storyteller_id}")
 
     storyteller_triggers, all_triggers = _collect_triggers(rows, storyteller_id)
+
+    # Structural triggers: speaker-count patterns from the segment data.
+    # Added to all_triggers (not storyteller_triggers) so they are suppressed
+    # inside the intro window by the state machine's raw_triggers selection.
+    structural = _structural_triggers(rows, storyteller_id, total_s)
+    all_triggers = all_triggers + structural
     print(
-        f"  Keyword triggers: {len(all_triggers)} total"
+        f"  Keyword triggers: {len(all_triggers) - len(structural)} total"
         f"  ({len(storyteller_triggers)} from storyteller)"
+    )
+    print(
+        f"  Structural triggers: {len(structural)}"
+        f"  (Night: {sum(1 for t in structural if t[1] == 'Night')},"
+        f"  Day: {sum(1 for t in structural if t[1] == 'Day')})"
     )
     if all_triggers:
         all_phase_hits         = Counter(t[1] for t in all_triggers)
