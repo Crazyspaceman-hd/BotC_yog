@@ -16,6 +16,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from pipeline_utils import load_playlist_entries
+
 # ── Config ────────────────────────────────────────────────────────────────────
 
 OUTPUTS_DIR   = Path("outputs")
@@ -44,16 +46,6 @@ PASS = "PASS"
 WARN = "WARN"
 FAIL = "FAIL"
 INFO = "INFO"
-
-
-def _load_playlist() -> list[dict]:
-    if not PLAYLIST_JSON.exists():
-        return []
-    try:
-        raw = json.loads(PLAYLIST_JSON.read_text(encoding="utf-8"))
-        return raw if isinstance(raw, list) else raw.get("entries", [])
-    except Exception:
-        return []
 
 
 class Report:
@@ -190,7 +182,7 @@ def check_db_reproducible(rpt: Report) -> None:
 
 def check_playlist_sync(rpt: Report) -> None:
     """playlist.json status fields match actual output files."""
-    entries = _load_playlist()
+    entries = load_playlist_entries()
     if not entries:
         rpt.add(FAIL, "playlist:sync", "playlist.json missing or empty")
         return
@@ -213,7 +205,7 @@ def check_playlist_sync(rpt: Report) -> None:
 
 def check_per_video_artifacts(rpt: Report, video_ids: list[str] | None = None) -> None:
     """Required output files exist for processed videos."""
-    entries = _load_playlist()
+    entries = load_playlist_entries()
     if not entries:
         return
 
@@ -262,7 +254,7 @@ def check_unlinked_speakers(rpt: Report) -> None:
         return
     # Build set of blind video IDs so we can classify differently
     blind_vids: set[str] = {
-        e["id"] for e in _load_playlist()
+        e["id"] for e in load_playlist_entries()
         if e.get("blind") or e.get("members_only")
     }
     try:
@@ -302,7 +294,7 @@ def check_unlinked_speakers(rpt: Report) -> None:
 
 def check_winner_coverage(rpt: Report) -> None:
     """All analyzed non-blind, non-members-only videos have a winner set."""
-    entries = _load_playlist()
+    entries = load_playlist_entries()
     if not entries:
         return
 
@@ -339,7 +331,7 @@ def check_winner_coverage(rpt: Report) -> None:
 
 def check_ghost_directories(rpt: Report) -> None:
     """No output directories for videos not in playlist.json."""
-    entries = _load_playlist()
+    entries = load_playlist_entries()
     playlist_ids = {e["id"] for e in entries}
     if not OUTPUTS_DIR.exists():
         return
@@ -395,7 +387,7 @@ def check_no_duplicate_pipeline_paths(rpt: Report) -> None:
 
 def check_pending_processable(rpt: Report) -> None:
     """Surface public non-skip videos that are pending but could be processed now."""
-    entries = _load_playlist()
+    entries = load_playlist_entries()
     if not entries:
         return
     processable = [
@@ -416,7 +408,7 @@ def check_pending_processable(rpt: Report) -> None:
 
 def check_partial_downloads(rpt: Report) -> None:
     """Detect videos with a webm/raw download but no converted audio.wav."""
-    entries = _load_playlist()
+    entries = load_playlist_entries()
     if not entries:
         return
     raw_exts = ("*.webm", "*.m4a", "*.mp3", "*.mkv")
@@ -454,7 +446,7 @@ def check_enrichment_artifacts(rpt: Report,
     """
     import csv as _csv
 
-    entries = _load_playlist()
+    entries = load_playlist_entries()
     if not entries:
         return
 

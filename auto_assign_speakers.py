@@ -24,7 +24,10 @@ import re
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from pipeline_utils import load_player_aliases, resolve_player_name
+from pipeline_utils import (
+    load_player_aliases, resolve_player_name,
+    load_playlist_entries, load_blind_vids,
+)
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
 
@@ -32,24 +35,10 @@ OUTPUTS_DIR = Path("outputs")
 PLAYLIST    = Path("playlist.json")
 ROLES_TXT   = Path("roles.txt")
 
-# ─── Player aliases ───────────────────────────────────────────────────────────
+# ─── Player aliases & blind-game set (loaded once at startup) ─────────────────
 
 _PLAYER_ALIASES: dict[str, str] = load_player_aliases()
-
-# ─── Blind-game set ───────────────────────────────────────────────────────────
-
-def _load_blind_vids() -> set[str]:
-    """Return set of video IDs marked as blind in playlist.json."""
-    if not PLAYLIST.exists():
-        return set()
-    try:
-        data = json.loads(PLAYLIST.read_text(encoding="utf-8"))
-        entries = data if isinstance(data, list) else data.get("entries", [])
-        return {e["id"] for e in entries if e.get("blind")}
-    except Exception:
-        return set()
-
-_BLIND_VIDS: set[str] = _load_blind_vids()
+_BLIND_VIDS: frozenset[str]     = load_blind_vids()
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -263,15 +252,6 @@ def _match_claim_to_player(
 
 
 # ─── I/O helpers ─────────────────────────────────────────────────────────────
-
-
-def _load_playlist() -> list[dict]:
-    if not PLAYLIST.exists():
-        return []
-    try:
-        return json.loads(PLAYLIST.read_text(encoding="utf-8")).get("entries", [])
-    except Exception:
-        return []
 
 
 def _load_overrides(vid: str) -> dict:
@@ -691,12 +671,12 @@ def main() -> None:
     if args.video:
         entries = [(args.video, args.video, False)]
         # Try to get title from playlist
-        for e in _load_playlist():
+        for e in load_playlist_entries():
             if e["id"] == args.video:
                 entries = [(e["id"], e.get("title", e["id"]), e.get("members", False))]
                 break
     else:
-        playlist = _load_playlist()
+        playlist = load_playlist_entries()
         if not playlist:
             print("ERROR: playlist.json not found. Run fetch_playlist.py first.")
             return
