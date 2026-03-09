@@ -1,7 +1,7 @@
 # BotC_yog — Pipeline DAG
 
-> **Last updated:** 2026-03-06
-> **State:** covers all scripts present as of commit `44b2d3d`
+> **Last updated:** 2026-03-06 (N1/N2/N3 added feat/nlp-enrichment)
+> **State:** covers all scripts present as of commit `44b2d3d`; N1–N3 are optional post-processing nodes added in feat/nlp-enrichment
 
 ---
 
@@ -66,11 +66,15 @@ A. video.download
 ├─► B. video.transcribe
 |
 ├─► C. video.diarize
+|        |
+|        └─► [N1. speaker.episode_consistency]   ← optional, writes segments_consistent.csv
 |
 B+C ──► D. video.merge
          |
          v
          E. video.patch      (optional but recommended)
+         |
+         └─► [N2. speaker.day_boundary_detection] ← optional, writes phase_labels.csv
 
 A ──► F. video.scrape       (independent of B/C/D — reads video.mp4 directly)
 
@@ -79,6 +83,8 @@ E+F ──► H. curation.auto_assign_speakers   (cross-video, reads E+F output)
          └─► (MANUAL GATE: I. curation.fix_rosters if issues remain)
               |
 E/F+overrides ──► G. video.analyze
+                   |
+                   ├─► [N3. content.claim_propagation] ← optional, writes claims.csv + claim_graph.json
                    |
                    v
                    J. data.build_db       (cross-video, reads all G outputs)
@@ -92,6 +98,8 @@ E/F+overrides ──► G. video.analyze
                    (any phase) ──► M. validate.end_state
 ```
 
+**N1/N2/N3 are optional enrichment nodes.** They do not affect playlist.json status, do not block any existing step, and are not required by J (build_db). They write new artifact files alongside existing outputs.
+
 **Notes:**
 - `F. video.scrape` can run after `A. video.download` (only needs `video.mp4`).
   In practice it is grouped with the per-video pipeline steps.
@@ -104,6 +112,41 @@ E/F+overrides ──► G. video.analyze
   It is never executed directly.
 - `M. validate.end_state` should be run after any phase to confirm no artifacts
   were left behind.
+
+---
+
+## Game Phases vs. Events
+
+The pipeline distinguishes between **phases** (broad temporal regions of a game) and
+**events** (discrete occurrences within those regions).
+
+**Major phases** — produced by N2 (phase_detection / `detect_phases.py`):
+
+| Phase | Description |
+|-------|-------------|
+| `Intro` | Pre-game: players announce roles; Storyteller assigns night abilities |
+| `Night` | Players close eyes; Storyteller resolves night actions privately |
+| `Day` | Open discussion; players talk, share information, accuse |
+| `Nomination` | A player is nominated; the group votes on whether to execute |
+| `Execution` | Storyteller announces the execution outcome |
+
+> **Design note:** `Town` is not a phase label in the code.  The open-discussion
+> period is labelled `Day`.  `Nomination` and `Execution` are sub-phases of what
+> a player would informally call "Town meeting."
+
+**Events inside phases** — produced by N3 (claim_extraction / `extract_claims.py`):
+
+| Event | Typical phase | Description |
+|-------|--------------|-------------|
+| `nomination` | Nomination | A player nominates another for execution |
+| `vote` | Nomination | A player casts a yes/no vote |
+| `execution` | Execution | ST announces result; player dies or survives |
+| `death` | Night / Execution | A player is removed from the game |
+| `role_claim` | Day / Night | A player claims (or implies) a role |
+| `accusation` | Day / Nomination | A player accuses another of being Evil |
+
+Phase labels from N2 are consumed by N3 to provide temporal context for event
+extraction (e.g. a role claim in Day has different weight than one at Night).
 
 ---
 
@@ -389,6 +432,54 @@ bash scripts/run_all.sh
 
 ---
 
+## N1. speaker.episode_consistency  [optional enrichment]
+
+| Field | Value |
+|-------|-------|
+| **Purpose** | Reduce intra-episode diarization fragmentation by smoothing short speaker flips and A/B/A patterns; does NOT build cross-episode voice identities |
+| **Script** | `speaker_consistency.py` |
+| **Per-video?** | Yes |
+| **Slot** | After C (diarize), before D (merge) — reads RTTM + raw segments |
+| **Inputs** | `diarization.rttm`, `segments.csv` (or `segments_patched.csv`) |
+| **Outputs** | `outputs/<id>/segments_consistent.csv` |
+| **Command** | `python speaker_consistency.py <video_id>` |
+| **Acceptance** | `segments_consistent.csv` exists with ≤ row count of input (merges reduce rows) |
+| **Notes** | Non-destructive: original `segments.csv` / `diarization.rttm` untouched. Reports before/after flip-count. Controlled by `--min-flip-s` and `--context-s` CLI flags. |
+
+---
+
+## N2. speaker.day_boundary_detection  [optional enrichment]
+
+| Field | Value |
+|-------|-------|
+| **Purpose** | Label each segment with its game phase (Intro / Night / Day / Nomination / Execution) using keyword heuristics and speaker patterns |
+| **Script** | `detect_phases.py` |
+| **Per-video?** | Yes |
+| **Slot** | After E (patch) — reads `segments_patched.csv` |
+| **Inputs** | `segments_patched.csv` (fallback: `segments_consistent.csv`, `segments.csv`) |
+| **Outputs** | `outputs/<id>/phase_labels.csv` (columns: start, end, phase, confidence, evidence) |
+| **Command** | `python detect_phases.py <video_id>` |
+| **Acceptance** | `phase_labels.csv` exists, rows cover full episode duration, phase column is one of the known values |
+| **Notes** | Purely text-based; no audio features. Storyteller speaker auto-detected by dominant intro presence. Low-confidence regions labelled `Unknown` then forward-filled. `--force` flag to overwrite. |
+
+---
+
+## N3. content.claim_propagation  [optional enrichment]
+
+| Field | Value |
+|-------|-------|
+| **Purpose** | Extract conversational events (role claims, accusations, suspicions, agreements, challenges) with timestamps, speakers, and targets; produce a claim relationship graph |
+| **Script** | `extract_claims.py` |
+| **Per-video?** | Yes |
+| **Slot** | After G (analyze) — reads `lie_analysis.csv`, `segments_patched.csv`, roster data, optional `phase_labels.csv` |
+| **Inputs** | `segments_patched.csv`, `intro_roster.json`, `roster_overrides.json` (optional), `phase_labels.csv` (optional), `lie_analysis.csv` |
+| **Outputs** | `outputs/<id>/claims.csv`, `outputs/<id>/claim_graph.json` |
+| **Command** | `python extract_claims.py <video_id>` |
+| **Acceptance** | Both output files exist; `claims.csv` header valid; `claim_graph.json` is valid JSON |
+| **Notes** | Event types: `role_claim`, `accusation`, `suspicion`, `agreement`, `challenge`. Graph nodes = claim events; edges = echo/support/challenge relationships. `lie_analysis.csv` rows are cross-referenced to mark verified lies. Blind games produce few or zero events (expected). |
+
+---
+
 ## Scripts Not in the DAG (Support / Utility)
 
 | Script | Role |
@@ -398,6 +489,9 @@ bash scripts/run_all.sh
 | `explore.py` | Full Streamlit editor (read/write) — local only |
 | `explore_public.py` | Read-only Streamlit viewer — public-facing analysis UI |
 | `validate.py` | End-state validator — run after any pipeline phase |
+| `speaker_consistency.py` | N1 optional enrichment: smooths diarization fragmentation |
+| `detect_phases.py` | N2 optional enrichment: game-phase boundary detection |
+| `extract_claims.py` | N3 optional enrichment: role-claim / accusation / suspicion extraction |
 
 ---
 
