@@ -16,6 +16,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from pipeline_utils import load_playlist_entries
+
 # ── Config ────────────────────────────────────────────────────────────────────
 
 OUTPUTS_DIR   = Path("outputs")
@@ -44,16 +46,6 @@ PASS = "PASS"
 WARN = "WARN"
 FAIL = "FAIL"
 INFO = "INFO"
-
-
-def _load_playlist() -> list[dict]:
-    if not PLAYLIST_JSON.exists():
-        return []
-    try:
-        raw = json.loads(PLAYLIST_JSON.read_text(encoding="utf-8"))
-        return raw if isinstance(raw, list) else raw.get("entries", [])
-    except Exception:
-        return []
 
 
 class Report:
@@ -190,7 +182,7 @@ def check_db_reproducible(rpt: Report) -> None:
 
 def check_playlist_sync(rpt: Report) -> None:
     """playlist.json status fields match actual output files."""
-    entries = _load_playlist()
+    entries = load_playlist_entries()
     if not entries:
         rpt.add(FAIL, "playlist:sync", "playlist.json missing or empty")
         return
@@ -213,7 +205,7 @@ def check_playlist_sync(rpt: Report) -> None:
 
 def check_per_video_artifacts(rpt: Report, video_ids: list[str] | None = None) -> None:
     """Required output files exist for processed videos."""
-    entries = _load_playlist()
+    entries = load_playlist_entries()
     if not entries:
         return
 
@@ -262,7 +254,7 @@ def check_unlinked_speakers(rpt: Report) -> None:
         return
     # Build set of blind video IDs so we can classify differently
     blind_vids: set[str] = {
-        e["id"] for e in _load_playlist()
+        e["id"] for e in load_playlist_entries()
         if e.get("blind") or e.get("members_only")
     }
     try:
@@ -302,7 +294,7 @@ def check_unlinked_speakers(rpt: Report) -> None:
 
 def check_winner_coverage(rpt: Report) -> None:
     """All analyzed non-blind, non-members-only videos have a winner set."""
-    entries = _load_playlist()
+    entries = load_playlist_entries()
     if not entries:
         return
 
@@ -339,7 +331,7 @@ def check_winner_coverage(rpt: Report) -> None:
 
 def check_ghost_directories(rpt: Report) -> None:
     """No output directories for videos not in playlist.json."""
-    entries = _load_playlist()
+    entries = load_playlist_entries()
     playlist_ids = {e["id"] for e in entries}
     if not OUTPUTS_DIR.exists():
         return
@@ -395,7 +387,7 @@ def check_no_duplicate_pipeline_paths(rpt: Report) -> None:
 
 def check_pending_processable(rpt: Report) -> None:
     """Surface public non-skip videos that are pending but could be processed now."""
-    entries = _load_playlist()
+    entries = load_playlist_entries()
     if not entries:
         return
     processable = [
@@ -416,7 +408,7 @@ def check_pending_processable(rpt: Report) -> None:
 
 def check_partial_downloads(rpt: Report) -> None:
     """Detect videos with a webm/raw download but no converted audio.wav."""
-    entries = _load_playlist()
+    entries = load_playlist_entries()
     if not entries:
         return
     raw_exts = ("*.webm", "*.m4a", "*.mp3", "*.mkv")
@@ -441,6 +433,72 @@ def check_partial_downloads(rpt: Report) -> None:
     else:
         rpt.add(PASS, "pipeline:partial_download",
                 "No partial downloads detected (all raw files have been converted)")
+
+
+# ── N1/N2/N3 Enrichment checks (INFO only — enrichment is always optional) ────
+
+def check_enrichment_artifacts(rpt: Report,
+                               video_ids: list[str] | None = None) -> None:
+    """Report presence/validity of optional N1/N2/N3 enrichment artifacts.
+
+    These are always INFO-level — missing enrichment files never cause WARN or FAIL.
+    Only run for 'analyzed' videos where the enrichment could have been generated.
+    """
+    import csv as _csv
+
+    entries = load_playlist_entries()
+    if not entries:
+        return
+
+    analyzed = [e["id"] for e in entries
+                if e.get("status") == "analyzed" and not e.get("skip")]
+    targets  = [v for v in analyzed
+                if video_ids is None or v in video_ids]
+
+    n1_present = n2_valid = n3_valid = 0
+    n1_total   = len(targets)
+    issues: list[str] = []
+
+    for vid in targets:
+        out = OUTPUTS_DIR / vid
+
+        # N1: segments_consistent.csv
+        p_cons = out / "segments_consistent.csv"
+        if p_cons.exists():
+            n1_present += 1
+
+        # N2: phase_labels.csv — check header and phase values
+        p_phase = out / "phase_labels.csv"
+        if p_phase.exists():
+            try:
+                rows = list(_csv.DictReader(p_phase.open(encoding="utf-8")))
+                valid_phases = {"Intro", "Night", "Day", "Nomination", "Execution", "Unknown"}
+                bad = [r["phase"] for r in rows if r.get("phase") not in valid_phases]
+                if bad:
+                    issues.append(f"{vid}: phase_labels.csv has unrecognised phases: {bad[:3]}")
+                else:
+                    n2_valid += 1
+            except Exception as exc:
+                issues.append(f"{vid}: phase_labels.csv unreadable — {exc}")
+
+        # N3: claims.csv + claim_graph.json
+        p_claims = out / "claims.csv"
+        p_graph  = out / "claim_graph.json"
+        if p_claims.exists() and p_graph.exists():
+            try:
+                rows = list(_csv.DictReader(p_claims.open(encoding="utf-8")))
+                _ = json.loads(p_graph.read_text(encoding="utf-8"))
+                n3_valid += 1
+            except Exception as exc:
+                issues.append(f"{vid}: claims artifact unreadable — {exc}")
+
+    summary = (f"N1 consistency: {n1_present}/{n1_total}  "
+               f"N2 phases: {n2_valid}/{n1_total}  "
+               f"N3 claims: {n3_valid}/{n1_total}")
+    rpt.add(INFO, "enrichment:artifacts", summary)
+
+    for issue in issues:
+        rpt.add(WARN, "enrichment:artifacts", issue)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -474,6 +532,7 @@ def main() -> None:
     check_partial_downloads(rpt)
     check_ui_source(rpt)
     check_no_duplicate_pipeline_paths(rpt)
+    check_enrichment_artifacts(rpt, [args.video] if args.video else None)
 
     print()
     if args.as_json:

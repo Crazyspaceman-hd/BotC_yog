@@ -1,11 +1,37 @@
 """pipeline_utils.py — Shared helpers used across pipeline steps.
 
 Imported by: merge_segments.py, patch_transcript.py, analyze_roles.py,
-             auto_assign_speakers.py, fix_rosters.py, build_db.py
+             auto_assign_speakers.py, fix_rosters.py, build_db.py,
+             validate.py
 """
 
 import json
 from pathlib import Path
+
+# ── Playlist helpers ───────────────────────────────────────────────────────────
+
+PLAYLIST_JSON = Path("playlist.json")
+
+
+def load_playlist_entries() -> list[dict]:
+    """Load playlist.json entries.
+
+    Handles both list-root and ``{"entries": [...]}`` wrapper formats.
+    Returns an empty list if the file is absent or unparseable.
+    """
+    if not PLAYLIST_JSON.exists():
+        return []
+    try:
+        raw = json.loads(PLAYLIST_JSON.read_text(encoding="utf-8"))
+        return raw if isinstance(raw, list) else raw.get("entries", [])
+    except Exception:
+        return []
+
+
+def load_blind_vids() -> frozenset[str]:
+    """Return frozenset of video IDs marked as 'blind' in playlist.json."""
+    return frozenset(e["id"] for e in load_playlist_entries() if e.get("blind"))
+
 
 # ── Player alias helpers ───────────────────────────────────────────────────────
 

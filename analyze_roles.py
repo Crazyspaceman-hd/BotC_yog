@@ -29,25 +29,17 @@ import json
 import re
 from pathlib import Path
 
-from pipeline_utils import parse_rttm, load_player_aliases, resolve_player_name, normalize_role
+from pipeline_utils import (
+    parse_rttm, load_player_aliases, resolve_player_name, normalize_role,
+    load_blind_vids,
+)
 
 INTRO_CUTOFF   = 300.0        # seconds — used to build the initial roster
 STORYTELLER_ID = "speaker_0"  # diarization always assigns lead voice to spk_0
 
 # ── Blind-game set (loaded once at startup) ───────────────────────────────────
-def _load_blind_vids() -> set[str]:
-    """Return set of video IDs marked as 'blind' in playlist.json."""
-    p = Path("playlist.json")
-    if not p.exists():
-        return set()
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-        entries = data if isinstance(data, list) else data.get("entries", [])
-        return {e["id"] for e in entries if e.get("blind")}
-    except Exception:
-        return set()
 
-_BLIND_VIDS: set[str] = _load_blind_vids()
+_BLIND_VIDS: frozenset[str] = load_blind_vids()
 _PLAYER_ALIASES: dict[str, str] = load_player_aliases()
 
 
