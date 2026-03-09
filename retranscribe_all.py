@@ -95,23 +95,48 @@ def main() -> None:
     cmd_base = [sys.executable, "run_pipeline.py", "--steps"] + STEPS + ["--force"]
 
     failed = []
+    done = 0
+    stopped = False
+
     for i, (vid, members, blind) in enumerate(to_process, 1):
         print(f"\n{'='*60}")
         print(f"[{i}/{len(to_process)}] {vid}"
               + (" (members)" if members else "")
               + (" (blind)" if blind else ""))
-        print(f"{'='*60}", flush=True)
-        result = subprocess.run(cmd_base + [vid])
-        if result.returncode != 0:
-            print(f"ERROR: {vid} exited with code {result.returncode}")
-            failed.append((vid, f"exit code {result.returncode}"))
+        print(f"{'='*60}  (Ctrl+C to stop after this video)", flush=True)
+
+        proc = subprocess.Popen(cmd_base + [vid])
+        try:
+            proc.wait()
+        except KeyboardInterrupt:
+            print(f"\n  Interrupt received — terminating {vid}...")
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            failed.append((vid, "interrupted"))
+            stopped = True
+            break
+
+        if proc.returncode != 0:
+            print(f"ERROR: {vid} exited with code {proc.returncode}")
+            failed.append((vid, f"exit code {proc.returncode}"))
         else:
             print(f"OK: {vid}")
+            done += 1
 
     print(f"\n{'='*60}")
-    print(f"Done. Processed {len(to_process) - len(failed)}/{len(to_process)} videos.")
+    if stopped:
+        remaining = len(to_process) - i
+        print(f"Stopped by user.  Completed {done}/{len(to_process)} videos"
+              + (f", {remaining} remaining." if remaining else "."))
+    else:
+        print(f"Done. Processed {done}/{len(to_process)} videos.")
     if failed:
-        print(f"FAILED ({len(failed)}):")
+        label = "INTERRUPTED/FAILED"
+        print(f"{label} ({len(failed)}):")
         for vid, err in failed:
             print(f"  {vid}: {err}")
     print("\nNext step: python build_db.py && python validate.py")
