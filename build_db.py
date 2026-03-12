@@ -98,6 +98,38 @@ CREATE TABLE IF NOT EXISTS roles (
     team  TEXT NOT NULL,     -- 'Good' or 'Evil'
     type  TEXT NOT NULL      -- 'Townsfolk' | 'Outsider' | 'Minion' | 'Demon' | 'Traveller' | 'Fabled'
 );
+
+-- N2: game-phase boundaries (from detect_phases.py)
+CREATE TABLE IF NOT EXISTS phase_labels (
+    rowid      INTEGER PRIMARY KEY,
+    video_id   TEXT NOT NULL REFERENCES videos(id),
+    start      REAL,
+    end        REAL,
+    phase      TEXT,        -- 'Intro' | 'Night' | 'Day' | 'Nomination' | 'Execution'
+    confidence REAL,
+    evidence   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_phase_vid ON phase_labels(video_id);
+
+-- N3: role claims, accusations, suspicions (from extract_claims.py)
+CREATE TABLE IF NOT EXISTS claims (
+    rowid           INTEGER PRIMARY KEY,
+    video_id        TEXT NOT NULL REFERENCES videos(id),
+    event_id        TEXT,
+    timestamp_start TEXT,
+    speaker         TEXT,
+    player_name     TEXT,
+    target_player   TEXT,
+    event_type      TEXT,   -- 'role_claim' | 'accusation' | 'suspicion' | 'agreement' | 'challenge'
+    claim_text      TEXT,
+    claimed_role    TEXT,
+    actual_role     TEXT,
+    verified_lie    INTEGER DEFAULT 0,  -- 0 = false, 1 = true
+    phase           TEXT,
+    confidence      REAL
+);
+CREATE INDEX IF NOT EXISTS idx_claims_vid  ON claims(video_id);
+CREATE INDEX IF NOT EXISTS idx_claims_type ON claims(event_type);
 """
 
 
@@ -182,11 +214,13 @@ def build(db_path: Path) -> None:
             )
             lies_total += len(rows)
 
-        # ── segments ──────────────────────────────────────────────────────────
-        seg_csv = out / "segments_patched.csv"
-        if not seg_csv.exists():
-            seg_csv = out / "segments.csv"
-        if seg_csv.exists():
+        # ── segments (prefer most-processed version) ──────────────────────────
+        seg_csv = next(
+            (out / n for n in ("segments_consistent.csv", "segments_patched.csv", "segments.csv")
+             if (out / n).exists()),
+            None,
+        )
+        if seg_csv is not None:
             con.execute("DELETE FROM segments WHERE video_id = ?", (vid,))
             rows = read_csv(seg_csv)
             con.executemany(
@@ -230,6 +264,58 @@ def build(db_path: Path) -> None:
             except Exception as exc:
                 print(f"  [WARN] roster {vid}: {exc}")
 
+    # ── phase_labels (N2 — from detect_phases.py) ────────────────────────────
+    phase_total = 0
+    for e in entries:
+        vid = e["id"]
+        phase_csv = Path("outputs") / vid / "phase_labels.csv"
+        if phase_csv.exists():
+            con.execute("DELETE FROM phase_labels WHERE video_id = ?", (vid,))
+            rows = read_csv(phase_csv)
+            con.executemany(
+                "INSERT INTO phase_labels(video_id, start, end, phase, confidence, evidence) "
+                "VALUES (?,?,?,?,?,?)",
+                [
+                    (vid, float(r.get("start", 0)), float(r.get("end", 0)),
+                     r.get("phase", ""), float(r.get("confidence", 0)), r.get("evidence", ""))
+                    for r in rows
+                ],
+            )
+            phase_total += len(rows)
+
+    # ── claims (N3 — from extract_claims.py) ─────────────────────────────────
+    claims_total = 0
+    for e in entries:
+        vid = e["id"]
+        claims_csv = Path("outputs") / vid / "claims.csv"
+        if claims_csv.exists():
+            con.execute("DELETE FROM claims WHERE video_id = ?", (vid,))
+            rows = read_csv(claims_csv)
+            con.executemany(
+                "INSERT INTO claims(video_id, event_id, timestamp_start, speaker, player_name, "
+                "target_player, event_type, claim_text, claimed_role, actual_role, "
+                "verified_lie, phase, confidence) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                [
+                    (
+                        vid,
+                        r.get("event_id", ""),
+                        r.get("timestamp_start", ""),
+                        r.get("speaker", ""),
+                        resolve_player_name(r.get("player_name", ""), _PLAYER_ALIASES),
+                        resolve_player_name(r.get("target_player", ""), _PLAYER_ALIASES),
+                        r.get("event_type", ""),
+                        r.get("claim_text", ""),
+                        display_role(r.get("claimed_role", "")),
+                        display_role(r.get("actual_role", "")),
+                        1 if str(r.get("verified_lie", "false")).lower() == "true" else 0,
+                        r.get("phase", ""),
+                        float(r.get("confidence", 0)),
+                    )
+                    for r in rows
+                ],
+            )
+            claims_total += len(rows)
+
     # ── speaker_map (from roster_overrides.json) ──────────────────────────────
     spkmap_total = 0
     for e in entries:
@@ -267,7 +353,8 @@ def build(db_path: Path) -> None:
     print(
         f"\nDone. Built {db_path}  ({size_kb:,} KB)\n"
         f"  lies={lies_total:,}   segments={segs_total:,}   "
-        f"roster_players={roster_total:,}   speaker_map={spkmap_total:,}"
+        f"roster_players={roster_total:,}   speaker_map={spkmap_total:,}\n"
+        f"  phase_labels={phase_total:,}   claims={claims_total:,}"
     )
     print(f"  Built at: {datetime.now().isoformat(timespec='seconds')}")
 

@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 
 ALREADY_MEDIUM = {"tf_LO5NKKUU", "HQlYPDUfM4Q", "F2f0nNeoWQM"}
-STEPS = ["transcribe", "merge", "patch", "analyze"]
+STEPS = ["transcribe", "merge", "patch", "analyze", "consistency", "phases", "claims"]
 OUTPUTS_DIR = Path("outputs")
 PLAYLIST = Path("playlist.json")
 
