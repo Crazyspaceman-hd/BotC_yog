@@ -808,13 +808,17 @@ def main(video_id: str = "lF96Jd3Eaeg") -> None:
                   playlist_data.get("entries", [])
         for e in entries:
             if e.get("id") == video_id:
-                e["winner"] = winner
+                existing = e.get("winner")
+                if winner is None and existing:
+                    print(f"Keeping existing winner='{existing}' (detection returned None)\n")
+                else:
+                    e["winner"] = winner
+                    playlist_path.write_text(
+                        json.dumps(playlist_data, indent=2, ensure_ascii=False),
+                        encoding="utf-8",
+                    )
+                    print(f"Saved winner='{winner}' to playlist.json\n")
                 break
-        playlist_path.write_text(
-            json.dumps(playlist_data, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        print(f"Saved winner='{winner}' to playlist.json\n")
 
     # ── G: console summary grouped by player ─────────────────────────────────
     print("=== Lie Analysis Summary ===\n")
