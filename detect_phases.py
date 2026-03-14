@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import re
 from collections import Counter
 from pathlib import Path
@@ -156,6 +157,38 @@ STRUCT_DAY_W   = 0.25   # Day trigger weight: ≥2 non-ST speakers in window
 # still drive Nomination→Day without relaxing the source-phase restriction that
 # prevents the false-fire regression in DzTk6kSIg-M.
 CUE_CLUSTER_BONUS = 0.30
+
+# ── Boundary-sharpening constants ─────────────────────────────────────────────
+# When sharpening Night/Day boundary timestamps we search this far either side
+# of the NLP-estimated boundary for a matching header-visibility transition.
+SHARPEN_SEARCH_S = 90.0
+
+# Storyteller phrases that mark the exact start of Night (header goes invisible).
+_NIGHT_START_RE: re.Pattern = re.compile(
+    r"\b(?:"
+    r"close your eyes"
+    r"|everyone close"
+    r"|go to sleep"
+    r"|night (?:one|two|three|four|five|six|seven|eight|nine|ten|\d+) begins"
+    r"|night falls"
+    r"|shut your eyes"
+    r"|time to sleep"
+    r")\b",
+    re.I,
+)
+
+# Storyteller phrases that mark the exact start of Day (header reappears).
+_DAY_START_RE: re.Pattern = re.compile(
+    r"\b(?:"
+    r"good morning"
+    r"|open your eyes"
+    r"|welcome back to (?:the )?town"
+    r"|sun rises"
+    r"|day (?:one|two|three|four|five|six|seven|eight|nine|ten|\d+) begins"
+    r"|wake up"
+    r")\b",
+    re.I,
+)
 
 _DEATH_LANGUAGE_RE: re.Pattern = re.compile(
     r"\b(?:"
@@ -765,6 +798,265 @@ def _collapse(
     return out
 
 
+# ── Visual ground-truth helpers (frame_scan.json) ─────────────────────────────
+
+def _load_votes_windows(out_dir: Path, interval_s: float = 30.0) -> list[tuple[float, float]]:
+    """Return merged time windows (start, end) where votes_visible=True.
+
+    Each frame-scan sample represents ~interval_s seconds.  Consecutive True
+    samples are merged into one window; a gap of ≤ interval_s between True
+    samples is also bridged (one missed frame does not split a nomination run).
+    Returns [] if frame_scan.json is absent or has no votes_visible frames.
+    """
+    fscan = out_dir / "frame_scan.json"
+    if not fscan.exists():
+        return []
+    data = json.loads(fscan.read_text(encoding="utf-8"))
+    interval_s = float(data.get("sample_interval_s", interval_s))
+    votes_times = sorted(
+        float(f["t"]) for f in data.get("frames", []) if f.get("votes_visible")
+    )
+    if not votes_times:
+        return []
+
+    half = interval_s / 2.0
+    # Bridge gaps ≤ 3 samples (90 s at default 30 s interval).
+    # The votes table can disappear briefly mid-nomination (inventory, camera
+    # pan, etc.) without the nomination actually ending.  Genuine separate
+    # nominations in BotC are always separated by several minutes of discussion,
+    # so anything within 90 s is the same event.
+    bridge = interval_s * 3
+    windows: list[list[float]] = [[votes_times[0] - half, votes_times[0] + half]]
+    for t in votes_times[1:]:
+        w_start = t - half
+        w_end   = t + half
+        if w_start <= windows[-1][1] + bridge:
+            windows[-1][1] = max(windows[-1][1], w_end)
+        else:
+            windows.append([w_start, w_end])
+    return [(max(0.0, s), e) for s, e in windows]
+
+
+def _apply_votes_overrides(
+    labeled_intervals: list[tuple[float, float, str, float, str]],
+    votes_windows: list[tuple[float, float]],
+) -> list[tuple[float, float, str, float, str]]:
+    """Hard-stamp intervals overlapping votes_windows as Nomination (conf=1.0).
+
+    Each overlapping interval is split into up to three pieces:
+      [pre-window part]  original phase
+      [window overlap]   Nomination, confidence=1.0
+      [post-window part] original phase
+    Applied after all NLP post-processing so _merge_short cannot absorb them.
+    """
+    if not votes_windows:
+        return labeled_intervals
+
+    result: list[tuple[float, float, str, float, str]] = []
+    for iv_start, iv_end, iv_phase, iv_conf, iv_ev in labeled_intervals:
+        overlaps = [
+            (max(ws, iv_start), min(we, iv_end))
+            for ws, we in votes_windows
+            if ws < iv_end and we > iv_start
+        ]
+        if not overlaps:
+            result.append((iv_start, iv_end, iv_phase, iv_conf, iv_ev))
+            continue
+
+        cursor = iv_start
+        for ov_start, ov_end in sorted(overlaps):
+            if cursor < ov_start:
+                result.append((cursor, ov_start, iv_phase, iv_conf, iv_ev))
+            result.append((
+                ov_start, ov_end,
+                "Nomination", 1.0, "frame_scan: votes table visible",
+            ))
+            cursor = ov_end
+        if cursor < iv_end:
+            result.append((cursor, iv_end, iv_phase, iv_conf, iv_ev))
+
+    return result
+
+
+# ── Boundary sharpening (frame_scan header + ST keywords) ─────────────────────
+
+def _load_frame_scan(out_dir: Path) -> list[dict]:
+    """Return frame_scan samples sorted by time, or [] if absent."""
+    fscan = out_dir / "frame_scan.json"
+    if not fscan.exists():
+        return []
+    data = json.loads(fscan.read_text(encoding="utf-8"))
+    return sorted(data.get("frames", []), key=lambda f: float(f["t"]))
+
+
+def _header_transitions(samples: list[dict]) -> list[dict]:
+    """Return header-visibility transitions from sorted frame_scan samples.
+
+    Each entry: {type, t_low, t_high} where [t_low, t_high] is the 30-second
+    window in which the transition occurred.
+
+    type='night_start' — header went True → False (game went to Night)
+    type='day_start'   — header went False → True (game returned to Day)
+    """
+    transitions = []
+    for i in range(1, len(samples)):
+        prev_hdr = bool(samples[i - 1].get("header_visible"))
+        curr_hdr = bool(samples[i].get("header_visible"))
+        t_low    = float(samples[i - 1]["t"])
+        t_high   = float(samples[i]["t"])
+        if prev_hdr and not curr_hdr:
+            transitions.append({"type": "night_start", "t_low": t_low, "t_high": t_high})
+        elif not prev_hdr and curr_hdr:
+            transitions.append({"type": "day_start",   "t_low": t_low, "t_high": t_high})
+    return transitions
+
+
+def _sharpen_boundaries(
+    labeled_intervals: list[tuple[float, float, str, float, str]],
+    frame_scan_samples: list[dict],
+    rows: list[dict],
+    storyteller_id: str,
+    search_s: float = SHARPEN_SEARCH_S,
+) -> list[tuple[float, float, str, float, str]]:
+    """Sharpen Night/Day boundary timestamps using header transitions + ST keywords.
+
+    For each Night or Day interval start:
+      1. Find the nearest header-visibility transition of the right type within
+         ±search_s of the NLP-estimated boundary.
+      2. Within that 30-second transition window (± a 30 s slack), search for a
+         Storyteller segment matching the phase-appropriate keyword regex.
+      3. If a keyword is found, use its timestamp as the precise boundary.
+         Otherwise fall back to the midpoint of the transition window.
+
+    Adjusts both the end of the preceding interval and the start of the current
+    one so the total timeline remains gapless.  Returns a new interval list.
+    """
+    if not frame_scan_samples:
+        return labeled_intervals
+
+    transitions = _header_transitions(frame_scan_samples)
+    if not transitions:
+        return labeled_intervals
+
+    # Storyteller segments only — we search these for keyword timestamps.
+    st_segs = sorted(
+        (r for r in rows if r.get("speaker") == storyteller_id),
+        key=lambda r: float(r["start"]),
+    )
+
+    def _keyword_t(
+        pattern: re.Pattern,
+        t_low: float,
+        t_high: float,
+        slack: float = 30.0,
+    ) -> float | None:
+        lo, hi = t_low - slack, t_high + slack
+        for seg in st_segs:
+            t = float(seg["start"])
+            if t < lo:
+                continue
+            if t > hi:
+                break
+            if pattern.search(seg.get("text", "")):
+                return t
+        return None
+
+    ivs = list(labeled_intervals)
+    for i in range(1, len(ivs)):
+        _, _, prev_phase, prev_conf, prev_ev = ivs[i - 1]
+        curr_start, curr_end, curr_phase, curr_conf, curr_ev = ivs[i]
+
+        # Only sharpen the start of Night and Day intervals.
+        if curr_phase == "Night":
+            trans_type = "night_start"
+            kw_pattern = _NIGHT_START_RE
+        elif curr_phase == "Day":
+            trans_type = "day_start"
+            kw_pattern = _DAY_START_RE
+        else:
+            continue
+
+        # Find the nearest matching header transition within ±search_s.
+        best_trans = min(
+            (t for t in transitions if t["type"] == trans_type),
+            key=lambda t: abs((t["t_low"] + t["t_high"]) / 2 - curr_start),
+            default=None,
+        )
+        if best_trans is None:
+            continue
+        mid = (best_trans["t_low"] + best_trans["t_high"]) / 2.0
+        if abs(mid - curr_start) > search_s:
+            continue  # nearest transition is too far away
+
+        # Try to find a precise Storyteller keyword within the window.
+        kw_t = _keyword_t(kw_pattern, best_trans["t_low"], best_trans["t_high"])
+        if kw_t is not None:
+            new_t   = kw_t
+            new_ev  = curr_ev + f" (sharpened: ST keyword at {kw_t:.1f}s)"
+        else:
+            new_t   = mid
+            new_ev  = (
+                curr_ev
+                + f" (sharpened: header {best_trans['t_low']:.0f}–{best_trans['t_high']:.0f}s)"
+            )
+
+        # Clamp: must stay within the bounds of both adjacent intervals.
+        prev_start = ivs[i - 1][0]
+        new_t = max(prev_start + 1.0, min(new_t, curr_end - 1.0))
+
+        ivs[i - 1] = (ivs[i - 1][0], new_t, prev_phase, prev_conf, prev_ev)
+        ivs[i]     = (new_t, curr_end, curr_phase, curr_conf, new_ev)
+
+    return ivs
+
+
+# ── Round numbering ────────────────────────────────────────────────────────────
+
+def _number_rounds(
+    labeled_intervals: list[tuple[float, float, str, float, str]],
+) -> list[tuple[float, float, str, float, str, int]]:
+    """Assign game round numbers and return 6-tuples (..., round).
+
+    A round groups one Day (possibly interrupted by Nominations) and its
+    following Night together under the same number.  The round increments
+    only when a Day phase begins after a Night — NOT on every Day interval
+    (because Nomination→Day resumes the same game day, not a new one).
+
+    Intro is always round 0.
+
+    Example:
+        Intro          round=0
+        Day            round=1   ← first Day starts round 1
+        Nomination     round=1   ← same game day
+        Day            round=1   ← nominations over, day resumes
+        Nomination     round=1
+        Night          round=1   ← Night 1 belongs to round 1
+        Day            round=2   ← Night ended → new round
+        Nomination     round=2
+        Night          round=2   ← Night 2 belongs to round 2
+    """
+    current_round = 0
+    came_from_night = False   # True while the last non-Intro phase was Night
+    result: list[tuple[float, float, str, float, str, int]] = []
+    for iv_start, iv_end, phase, conf, ev in labeled_intervals:
+        if phase == "Intro":
+            rnd = 0
+        elif phase == "Day":
+            # New round only on the FIRST Day or when arriving from a Night.
+            if current_round == 0 or came_from_night:
+                current_round += 1
+            came_from_night = False
+            rnd = current_round
+        elif phase == "Night":
+            came_from_night = True
+            rnd = current_round   # Night belongs to the same round as its Day
+        else:  # Nomination, Execution — part of the current day
+            came_from_night = False
+            rnd = current_round
+        result.append((iv_start, iv_end, phase, conf, ev, rnd))
+    return result
+
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def main(video_id: str, force: bool = False) -> None:
@@ -817,27 +1109,59 @@ def main(video_id: str, force: bool = False) -> None:
     labeled_intervals = _merge_short(labeled_intervals, MIN_PHASE_S)
     labeled_intervals = _collapse(labeled_intervals)
 
-    phase_summary = Counter(iv[2] for iv in labeled_intervals)
-    print(f"  Output intervals: {len(labeled_intervals)}  phases: {dict(phase_summary)}")
+    # ── Visual ground-truth override (N0 frame_scan) ──────────────────────────
+    # votes_visible=True windows from scan_frames.py are hard Nomination ground
+    # truth.  Applied after NLP post-processing so _merge_short cannot absorb
+    # them; a final _collapse merges any adjacent Nomination intervals.
+    frame_scan_samples = _load_frame_scan(out_dir)
+    votes_windows = _load_votes_windows(out_dir)
+    if votes_windows:
+        print(
+            f"  Visual override: {len(votes_windows)} votes-visible window(s) from frame_scan.json"
+        )
+        labeled_intervals = _apply_votes_overrides(labeled_intervals, votes_windows)
+        labeled_intervals = _collapse(labeled_intervals)
+    else:
+        print("  Visual override: no frame_scan.json (or no votes_visible frames) — NLP only")
+
+    # ── Boundary sharpening (header transitions + ST keywords) ────────────────
+    # Refines Night/Day start timestamps from ±60 s NLP accuracy to the exact
+    # second using the frame_scan header-visibility flip and the Storyteller's
+    # "close your eyes" / "good morning" cue word.
+    n_transitions = len(_header_transitions(frame_scan_samples))
+    if frame_scan_samples and n_transitions:
+        labeled_intervals = _sharpen_boundaries(
+            labeled_intervals, frame_scan_samples, rows, storyteller_id
+        )
+        print(f"  Boundary sharpening: {n_transitions} header transition(s) available")
+    else:
+        print("  Boundary sharpening: skipped (no frame_scan header transitions)")
+
+    # ── Round numbering ───────────────────────────────────────────────────────
+    numbered = _number_rounds(labeled_intervals)
+
+    phase_summary = Counter(iv[2] for iv in numbered)
+    print(f"  Output intervals: {len(numbered)}  phases: {dict(phase_summary)}")
 
     with out_path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(
-            f, fieldnames=["start", "end", "phase", "confidence", "evidence"]
+            f, fieldnames=["start", "end", "phase", "round", "confidence", "evidence"]
         )
         writer.writeheader()
-        for iv_start, iv_end, iv_phase, iv_conf, iv_ev in labeled_intervals:
+        for iv_start, iv_end, iv_phase, iv_conf, iv_ev, iv_round in numbered:
             writer.writerow({
                 "start": round(iv_start, 3), "end": round(iv_end, 3),
-                "phase": iv_phase, "confidence": iv_conf, "evidence": iv_ev,
+                "phase": iv_phase, "round": iv_round,
+                "confidence": iv_conf, "evidence": iv_ev,
             })
 
-    print(f"\n  Wrote {len(labeled_intervals)} rows -> {out_path}")
+    print(f"\n  Wrote {len(numbered)} rows -> {out_path}")
     print("\n  Sample (first 10 rows):")
-    for iv in labeled_intervals[:10]:
-        iv_start, iv_end, iv_phase, iv_conf, iv_ev = iv
+    for iv in numbered[:10]:
+        iv_start, iv_end, iv_phase, iv_conf, iv_ev, iv_round = iv
         print(
             f"    {iv_start:8.1f}s - {iv_end:8.1f}s"
-            f"  {iv_phase:12s}  conf={iv_conf:.2f}  \"{iv_ev[:55]}\""
+            f"  {iv_phase:12s}  rnd={iv_round}  conf={iv_conf:.2f}  \"{iv_ev[:50]}\""
         )
 
 

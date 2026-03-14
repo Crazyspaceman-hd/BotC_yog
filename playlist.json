@@ -78,7 +78,7 @@
       "title": "This is how we record Blood on the Clocktower in Minecraft! | Blood on the Clocktower Bonus",
       "duration": 3576,
       "url": "https://www.youtube.com/watch?v=OYTaTtjk3ac",
-      "status": "pending",
+      "status": "analyzed",
       "members_only": true,
       "members": true,
       "skip": true,
@@ -495,8 +495,7 @@
       "title": "Tom the Puppet Master - Blood on the Clocktower in Minecraft",
       "duration": 4116,
       "url": "https://www.youtube.com/watch?v=OaAUvM4SAkg",
-      "status": "pending",
-      "members_only": true
+      "status": "analyzed"
     }
   ]
 }

@@ -33,9 +33,12 @@ PLAYLIST_JSON = Path("playlist.json")
 
 ALL_STEPS = ["download", "transcribe", "diarize", "merge", "patch", "scrape", "analyze"]
 
-# Optional enrichment steps (N1 speaker_consistency / N2 phase_detection / N3 claim_extraction) — not run by default, not part of
-# playlist.json status machine, do not block existing pipeline.
-ENRICH_STEPS = ["consistency", "phases", "claims"]
+# Optional enrichment steps — not run by default, not part of playlist.json status machine.
+# N0 scan: visual frame scan (requires video.mp4 from download step)
+# N1 consistency: speaker consistency correction
+# N2 phases: game-phase boundary detection
+# N3 claims: role-claim / accusation extraction
+ENRICH_STEPS = ["scan", "consistency", "phases", "claims"]
 
 # Expected output file for each step (relative to outputs/<video_id>/)
 _STEP_OUTPUT = {
@@ -47,6 +50,7 @@ _STEP_OUTPUT = {
     "scrape":      "intro_roster.json",
     "analyze":     "lie_analysis.csv",
     # enrichment steps
+    "scan":        "frame_scan.json",
     "consistency": "segments_consistent.csv",
     "phases":      "phase_labels.csv",
     "claims":      "claims.csv",
@@ -243,7 +247,11 @@ def _run_step(step: str, video_id: str, force: bool, browser: str | None = None)
         import analyze_roles
         analyze_roles.main(video_id)
 
-    # ── Optional enrichment steps (N1 speaker_consistency / N2 phase_detection / N3 claim_extraction) ─
+    # ── Optional enrichment steps (N0 scan / N1 consistency / N2 phases / N3 claims) ─────────────────
+    elif step == "scan":
+        import scan_frames
+        scan_frames.scan(video_id, force=force)
+
     elif step == "consistency":
         import speaker_consistency
         speaker_consistency.main(video_id, force=force)
@@ -310,9 +318,14 @@ def main() -> None:
         if not PLAYLIST_JSON.exists():
             sys.exit("playlist.json not found — run fetch_playlist.py first")
         data = json.loads(PLAYLIST_JSON.read_text(encoding="utf-8"))
+
+        # If every requested step is an enrichment step, include already-analyzed
+        # videos — they still need post-processing (scan, consistency, phases, claims).
+        enrich_only = all(s in ENRICH_STEPS for s in args.steps)
+
         pending = [
             e for e in data.get("entries", [])
-            if e.get("status") != "analyzed"
+            if (enrich_only or e.get("status") != "analyzed")
             and not e.get("members_only")
             and not e.get("skip")
         ]

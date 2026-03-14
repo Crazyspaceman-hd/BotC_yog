@@ -69,15 +69,29 @@ CREATE VIRTUAL TABLE IF NOT EXISTS segments_fts USING fts5(
 );
 
 CREATE TABLE IF NOT EXISTS roster (
-    rowid        INTEGER PRIMARY KEY,
-    video_id     TEXT NOT NULL REFERENCES videos(id),
-    player_name  TEXT,
-    actual_role  TEXT,
-    believed_role TEXT,
-    frame_time   REAL
+    rowid              INTEGER PRIMARY KEY,
+    video_id           TEXT NOT NULL REFERENCES videos(id),
+    player_name        TEXT,
+    actual_role        TEXT,   -- final role at end of game
+    initial_actual_role TEXT,  -- role at game start (may differ if role changed)
+    believed_role      TEXT,
+    role_changed       INTEGER DEFAULT 0,  -- 1 if player changed roles during game
+    frame_time         REAL
 );
 CREATE INDEX IF NOT EXISTS idx_roster_vid ON roster(video_id);
 CREATE INDEX IF NOT EXISTS idx_roster_pn  ON roster(player_name);
+
+-- Role changes detected mid-game (from analyze_roles.py / manual entry)
+CREATE TABLE IF NOT EXISTS role_changes (
+    rowid         INTEGER PRIMARY KEY,
+    video_id      TEXT NOT NULL REFERENCES videos(id),
+    player_name   TEXT,
+    previous_role TEXT,
+    new_role      TEXT,
+    change_time_s REAL,   -- seconds into the video
+    source        TEXT    -- 'nlp' | 'manual'
+);
+CREATE INDEX IF NOT EXISTS idx_rchg_vid ON role_changes(video_id);
 
 -- Manual speaker-to-player assignments (from roster_overrides.json)
 CREATE TABLE IF NOT EXISTS speaker_map (
@@ -106,10 +120,21 @@ CREATE TABLE IF NOT EXISTS phase_labels (
     start      REAL,
     end        REAL,
     phase      TEXT,        -- 'Intro' | 'Night' | 'Day' | 'Nomination' | 'Execution'
+    round      INTEGER DEFAULT 0,  -- game round (Day 1=1, Night 1=1, Day 2=2 …)
     confidence REAL,
     evidence   TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_phase_vid ON phase_labels(video_id);
+
+-- N0: visual frame scan (from scan_frames.py) — header bar + votes table visibility
+CREATE TABLE IF NOT EXISTS frame_scan (
+    rowid      INTEGER PRIMARY KEY,
+    video_id   TEXT NOT NULL REFERENCES videos(id),
+    t          REAL,            -- timestamp (seconds)
+    header_visible INTEGER,     -- 0/1 — player role-bar visible at top
+    votes_visible  INTEGER      -- 0/1 — nomination voting table visible
+);
+CREATE INDEX IF NOT EXISTS idx_fscan_vid ON frame_scan(video_id);
 
 -- N3: role claims, accusations, suspicions (from extract_claims.py)
 CREATE TABLE IF NOT EXISTS claims (
@@ -152,6 +177,18 @@ def build(db_path: Path) -> None:
 
     con = sqlite3.connect(db_path)
     con.executescript(DDL)
+
+    # ── schema migrations (add columns that may be absent from older DBs) ─────
+    _migrations = [
+        "ALTER TABLE roster ADD COLUMN initial_actual_role TEXT",
+        "ALTER TABLE roster ADD COLUMN role_changed INTEGER DEFAULT 0",
+        "ALTER TABLE phase_labels ADD COLUMN round INTEGER DEFAULT 0",
+    ]
+    for _sql in _migrations:
+        try:
+            con.execute(_sql)
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
     # ── videos ────────────────────────────────────────────────────────────────
     print(f"Loading {len(entries)} videos …")
@@ -248,13 +285,16 @@ def build(db_path: Path) -> None:
                 players = data.get("players", [])
                 con.executemany(
                     "INSERT INTO roster(video_id, player_name, actual_role, "
-                    "believed_role, frame_time) VALUES (?,?,?,?,?)",
+                    "initial_actual_role, believed_role, role_changed, frame_time) "
+                    "VALUES (?,?,?,?,?,?,?)",
                     [
                         (
                             vid,
                             resolve_player_name(p.get("name", ""), _PLAYER_ALIASES),
                             display_role(p.get("actual_role", "")),
+                            display_role(p.get("initial_actual_role") or p.get("actual_role", "")),
                             display_role(p.get("believed_role", "")),
+                            1 if p.get("role_history") else 0,
                             p.get("frame_time", 0.0),
                         )
                         for p in players
@@ -263,6 +303,34 @@ def build(db_path: Path) -> None:
                 roster_total += len(players)
             except Exception as exc:
                 print(f"  [WARN] roster {vid}: {exc}")
+
+    # ── role_changes (from analyze_roles.py) ─────────────────────────────────
+    rchg_total = 0
+    for e in entries:
+        vid = e["id"]
+        rchg_json = Path("outputs") / vid / "role_changes.json"
+        if rchg_json.exists():
+            try:
+                changes = json.loads(rchg_json.read_text(encoding="utf-8"))
+                con.execute("DELETE FROM role_changes WHERE video_id = ?", (vid,))
+                con.executemany(
+                    "INSERT INTO role_changes(video_id, player_name, previous_role, "
+                    "new_role, change_time_s, source) VALUES (?,?,?,?,?,?)",
+                    [
+                        (
+                            vid,
+                            c.get("player_name", ""),
+                            display_role(c.get("previous_role", "")),
+                            display_role(c.get("new_role", "")),
+                            float(c.get("time", 0)),
+                            c.get("source", "nlp"),
+                        )
+                        for c in changes
+                    ],
+                )
+                rchg_total += len(changes)
+            except Exception as exc:
+                print(f"  [WARN] role_changes {vid}: {exc}")
 
     # ── phase_labels (N2 — from detect_phases.py) ────────────────────────────
     phase_total = 0
@@ -273,11 +341,12 @@ def build(db_path: Path) -> None:
             con.execute("DELETE FROM phase_labels WHERE video_id = ?", (vid,))
             rows = read_csv(phase_csv)
             con.executemany(
-                "INSERT INTO phase_labels(video_id, start, end, phase, confidence, evidence) "
-                "VALUES (?,?,?,?,?,?)",
+                "INSERT INTO phase_labels(video_id, start, end, phase, round, confidence, evidence) "
+                "VALUES (?,?,?,?,?,?,?)",
                 [
                     (vid, float(r.get("start", 0)), float(r.get("end", 0)),
-                     r.get("phase", ""), float(r.get("confidence", 0)), r.get("evidence", ""))
+                     r.get("phase", ""), int(r.get("round", 0)),
+                     float(r.get("confidence", 0)), r.get("evidence", ""))
                     for r in rows
                 ],
             )
@@ -316,6 +385,29 @@ def build(db_path: Path) -> None:
             )
             claims_total += len(rows)
 
+    # ── frame_scan (N0 — from scan_frames.py) ────────────────────────────────
+    fscan_total = 0
+    for e in entries:
+        vid = e["id"]
+        fscan_json = Path("outputs") / vid / "frame_scan.json"
+        if fscan_json.exists():
+            try:
+                data = json.loads(fscan_json.read_text(encoding="utf-8"))
+                con.execute("DELETE FROM frame_scan WHERE video_id = ?", (vid,))
+                frames = data.get("frames", [])
+                con.executemany(
+                    "INSERT INTO frame_scan(video_id, t, header_visible, votes_visible) "
+                    "VALUES (?,?,?,?)",
+                    [
+                        (vid, f["t"], 1 if f["header_visible"] else 0,
+                         1 if f["votes_visible"] else 0)
+                        for f in frames
+                    ],
+                )
+                fscan_total += len(frames)
+            except Exception as exc:
+                print(f"  [WARN] frame_scan {vid}: {exc}")
+
     # ── speaker_map (from roster_overrides.json) ──────────────────────────────
     spkmap_total = 0
     for e in entries:
@@ -331,7 +423,7 @@ def build(db_path: Path) -> None:
                  resolve_player_name(ov.get("name", ""), _PLAYER_ALIASES),
                  display_role(ov.get("actual_role", "")), display_role(ov.get("believed_role", "")))
                 for spk, ov in overrides.items()
-                if ov.get("name")   # only store entries with a name assigned
+                if isinstance(ov, dict) and ov.get("name")   # only store entries with a name assigned
             ]
             con.executemany(
                 "INSERT INTO speaker_map(video_id, speaker, name, actual_role, believed_role) "
@@ -354,7 +446,8 @@ def build(db_path: Path) -> None:
         f"\nDone. Built {db_path}  ({size_kb:,} KB)\n"
         f"  lies={lies_total:,}   segments={segs_total:,}   "
         f"roster_players={roster_total:,}   speaker_map={spkmap_total:,}\n"
-        f"  phase_labels={phase_total:,}   claims={claims_total:,}"
+        f"  phase_labels={phase_total:,}   claims={claims_total:,}   "
+        f"frame_scan={fscan_total:,}   role_changes={rchg_total:,}"
     )
     print(f"  Built at: {datetime.now().isoformat(timespec='seconds')}")
 

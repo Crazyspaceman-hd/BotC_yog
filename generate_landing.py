@@ -22,7 +22,7 @@ from pathlib import Path
 import pandas as pd
 
 # ── reuse shared helpers ───────────────────────────────────────────────────────
-from botc_ui import _team
+from botc_ui import _team, _role_type
 
 DB_PATH  = Path("botc.db")
 OUT_PATH = Path("landing.html")
@@ -403,19 +403,92 @@ def _compute_stats(df: pd.DataFrame, exclude_goblin: bool = False) -> dict:
     role_df[["games_faked_in", "games_claimed_by_other"]] = (
         role_df[["games_faked_in", "games_claimed_by_other"]].fillna(0).astype(int)
     )
+
+    # ── Cover split: Evil claimants vs Good claimants ─────────────────────────
+    # Non-holders who claimed role X, tagged by their own actual team.
+    _other_team = df[
+        df["claimed_role"].notna() &
+        ~df["claimed_role"].str.lower().isin(["", "unknown"]) &
+        (df["claimed_role"] != df["actual_role"])
+    ].copy()
+    _other_team["claimant_team"] = _other_team["actual_role"].map(_team)
+    _role_cover_evil = (
+        _other_team[_other_team["claimant_team"] == "Evil"]
+        .groupby("claimed_role")["video_id"].nunique()
+        .rename("games_cover_evil").rename_axis("actual_role")
+    )
+    _role_cover_good = (
+        _other_team[_other_team["claimant_team"] == "Good"]
+        .groupby("claimed_role")["video_id"].nunique()
+        .rename("games_cover_good").rename_axis("actual_role")
+    )
+    role_df = role_df.merge(_role_cover_evil.reset_index(), on="actual_role", how="left")
+    role_df = role_df.merge(_role_cover_good.reset_index(), on="actual_role", how="left")
+    role_df[["games_cover_evil", "games_cover_good"]] = (
+        role_df[["games_cover_evil", "games_cover_good"]].fillna(0).astype(int)
+    )
+
+    # ── Phantom claims: role claimed in a game where it wasn't actually in play ─
+    _appeared_per_game  = df.groupby("actual_role")["video_id"].apply(set)
+    _all_claimed_per_game = (
+        df[df["claimed_role"].notna() & (df["claimed_role"] != "")]
+        .groupby("claimed_role")["video_id"].apply(set)
+        .rename_axis("actual_role")
+    )
+    role_df["games_phantom"] = role_df["actual_role"].map(
+        lambda r: len(_all_claimed_per_game.get(r, set()) - _appeared_per_game.get(r, set()))
+    ).fillna(0).astype(int)
+
     role_df = role_df[role_df["games"] >= 2].copy()
     role_df["lie_rate"] = (
         role_df["games_faked_in"] / role_df["games"].replace(0, float("nan"))
     )
     role_df = role_df.sort_values("lie_rate", ascending=False)
+
+    # ── Type + wins lookups ───────────────────────────────────────────────────
+    role_df["type"] = role_df["actual_role"].map(_role_type)
+
+    _wr_lookup: dict[str, float] = {
+        str(row["actual_role"]): round(float(row["win_rate"]), 3)
+        for _, row in rw_grp.iterrows()
+        if pd.notna(row.get("win_rate"))
+    }
+    _wins_lookup: dict[str, int] = {
+        str(row["actual_role"]): int(row["wins"])
+        for _, row in rw_grp.iterrows()
+    }
+
+    # ── Most oblivious outsider: highest (games_not_claimed / games) rate ─────
+    _out_df = role_df[role_df["type"] == "Outsider"].copy()
+    _out_df["hidden_rate"] = (
+        _out_df["games_not_claimed"] / _out_df["games"].replace(0, float("nan"))
+    )
+    most_oblivious_outsider: dict | None = None
+    if not _out_df.empty and _out_df["hidden_rate"].notna().any():
+        _top_out = _out_df.dropna(subset=["hidden_rate"]).sort_values(
+            "hidden_rate", ascending=False
+        ).iloc[0]
+        most_oblivious_outsider = {
+            "role":             str(_top_out["actual_role"]),
+            "games":            int(_top_out["games"]),
+            "games_not_claimed": int(_top_out["games_not_claimed"]),
+            "hidden_rate":      round(float(_top_out["hidden_rate"]), 3),
+        }
+
     roles = role_df.apply(lambda r: {
         "role":                   r["actual_role"],
         "team":                   r["team"],
+        "type":                   r["type"],
         "games":                  int(r["games"]),
+        "wins":                   _wins_lookup.get(r["actual_role"], 0),
         "games_faked_in":         int(r["games_faked_in"]),
         "games_claimed_by_other": int(r["games_claimed_by_other"]),
+        "games_cover_evil":       int(r["games_cover_evil"]),
+        "games_cover_good":       int(r["games_cover_good"]),
         "games_not_claimed":      int(r["games_not_claimed"]),
+        "games_phantom":          int(r["games_phantom"]),
         "lie_rate":               round(float(r["lie_rate"]), 3) if pd.notna(r["lie_rate"]) else 0.0,
+        "win_rate":               _wr_lookup.get(r["actual_role"]),
     }, axis=1).tolist()
 
     # ── all-player table (for the leaderboard section) ────────────────────────
@@ -462,15 +535,16 @@ def _compute_stats(df: pd.DataFrame, exclude_goblin: bool = False) -> dict:
             "unverified": n_unver,
         },
         "superlatives": {
-            "most_evil":       _clean(most_evil),
-            "most_good":       _clean(most_good),
-            "biggest_liar":    _clean(biggest_liar),
-            "most_honest":     _clean(most_honest),
-            "traitor":         _clean(traitor),
-            "most_games":      _clean(most_games),
-            "most_faked_role": most_faked_role,
-            "best_evil_role":  best_evil_role,
-            "best_good_role":  best_good_role,
+            "most_evil":               _clean(most_evil),
+            "most_good":               _clean(most_good),
+            "biggest_liar":            _clean(biggest_liar),
+            "most_honest":             _clean(most_honest),
+            "traitor":                 _clean(traitor),
+            "most_games":              _clean(most_games),
+            "most_faked_role":         most_faked_role,
+            "best_evil_role":          best_evil_role,
+            "best_good_role":          best_good_role,
+            "most_oblivious_outsider": most_oblivious_outsider,
         },
         "top_liars":   top_liars,
         "fake_roles":  fake_roles,
@@ -499,7 +573,8 @@ def _empty_stats() -> dict:
                          ["most_evil", "most_good", "biggest_liar",
                           "most_honest", "traitor", "most_games",
                           "most_talkative", "most_faked_role",
-                          "best_evil_role", "best_good_role"]},
+                          "best_evil_role", "best_good_role",
+                          "most_oblivious_outsider"]},
         "top_liars":      [],
         "fake_roles":     [],
         "roles":          [],
@@ -869,8 +944,12 @@ footer a {{ color: var(--gold); }}
   letter-spacing: .04em;
   border-bottom: 1px solid var(--border);
 }}
-.roles-evil-hdr {{ background: #200d0d; color: #fca5a5; }}
-.roles-good-hdr {{ background: #0a1120; color: #93c5fd; }}
+.roles-evil-hdr    {{ background: #200d0d; color: #fca5a5; }}
+.roles-good-hdr    {{ background: #0a1120; color: #93c5fd; }}
+.roles-demon-hdr   {{ background: #1a0808; color: #f87171; }}
+.roles-minion-hdr  {{ background: #1a0e07; color: #fdba74; }}
+.roles-outsider-hdr {{ background: #081318; color: #67e8f9; }}
+.roles-townsfolk-hdr {{ background: #0a1120; color: #93c5fd; }}
 
 /* ── Evil vs Good wins scoreboard ── */
 .wins-board {{
@@ -1238,9 +1317,13 @@ body.mc .rate-bar-fill {{ border-radius: 0; }}
 body.mc .badge {{ border-radius: 0; font-family: 'Press Start 2P', monospace; font-size: 0.45rem; }}
 body.mc .badge-evil {{ background: #5a0000; color: #ff8888; }}
 body.mc .badge-good {{ background: #005500; color: #88ff88; }}
-body.mc .roles-evil-hdr {{ background: #3d0000 !important; color: #ff8888 !important; font-family: 'Press Start 2P', monospace; font-size: 0.6rem; }}
-body.mc .roles-good-hdr {{ background: #003d00 !important; color: #88ff88 !important; font-family: 'Press Start 2P', monospace; font-size: 0.6rem; }}
-body.mc .roles-faked-hdr {{ background: #1a0030 !important; color: #cc88ff !important; font-family: 'Press Start 2P', monospace; font-size: 0.55rem; }}
+body.mc .roles-evil-hdr     {{ background: #3d0000 !important; color: #ff8888 !important; font-family: 'Press Start 2P', monospace; font-size: 0.6rem; }}
+body.mc .roles-good-hdr     {{ background: #003d00 !important; color: #88ff88 !important; font-family: 'Press Start 2P', monospace; font-size: 0.6rem; }}
+body.mc .roles-faked-hdr    {{ background: #1a0030 !important; color: #cc88ff !important; font-family: 'Press Start 2P', monospace; font-size: 0.55rem; }}
+body.mc .roles-demon-hdr    {{ background: #3d0000 !important; color: #ff8888 !important; font-family: 'Press Start 2P', monospace; font-size: 0.6rem; }}
+body.mc .roles-minion-hdr   {{ background: #2b1800 !important; color: #ffaa44 !important; font-family: 'Press Start 2P', monospace; font-size: 0.6rem; }}
+body.mc .roles-outsider-hdr {{ background: #001820 !important; color: #44ddff !important; font-family: 'Press Start 2P', monospace; font-size: 0.6rem; }}
+body.mc .roles-townsfolk-hdr {{ background: #003d00 !important; color: #88ff88 !important; font-family: 'Press Start 2P', monospace; font-size: 0.6rem; }}
 body.mc .game-card {{
   background: #3c3c3c;
   border: 2px solid #1a1a1a;
@@ -1382,19 +1465,35 @@ body.mc #theme-toggle:active {{
       </table>
     </div>
 
-    <div class="roles-row">
+    <div class="roles-row" style="margin-bottom:16px">
       <div class="table-card">
-        <div class="roles-team-hdr roles-evil-hdr">😈 Evil Roles</div>
+        <div class="roles-team-hdr roles-demon-hdr">👹 Demon <span style="font-size:.78rem;font-weight:400;opacity:.7">(sorted by games played)</span></div>
         <table>
-          <thead><tr><th>Role</th><th>Games</th><th>Lie rate</th></tr></thead>
-          <tbody id="evil-roles-body"></tbody>
+          <thead><tr><th>Role</th><th>Appeared</th><th>Won</th><th>Win rate</th></tr></thead>
+          <tbody id="demon-roles-body"></tbody>
         </table>
       </div>
       <div class="table-card">
-        <div class="roles-team-hdr roles-good-hdr">😇 Good Roles <span style="font-size:.78rem;font-weight:400;opacity:.7">(sorted by cover story usage)</span></div>
+        <div class="roles-team-hdr roles-minion-hdr">😈 Minion <span style="font-size:.78rem;font-weight:400;opacity:.7">(sorted by games played)</span></div>
         <table>
-          <thead><tr><th>Role</th><th>Games</th><th>Used as cover story</th><th>Lie rate</th></tr></thead>
-          <tbody id="good-roles-body"></tbody>
+          <thead><tr><th>Role</th><th>Appeared</th><th>Won</th><th>Lie rate</th></tr></thead>
+          <tbody id="minion-roles-body"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="roles-row">
+      <div class="table-card">
+        <div class="roles-team-hdr roles-outsider-hdr">🤷 Outsider <span style="font-size:.78rem;font-weight:400;opacity:.7">(sorted by evil cover usage)</span></div>
+        <table>
+          <thead><tr><th>Role</th><th>Games</th><th>Evil cover</th><th>Good cover</th></tr></thead>
+          <tbody id="outsider-roles-body"></tbody>
+        </table>
+      </div>
+      <div class="table-card">
+        <div class="roles-team-hdr roles-townsfolk-hdr">🕵️ Townsfolk <span style="font-size:.78rem;font-weight:400;opacity:.7">(sorted by evil cover usage)</span></div>
+        <table>
+          <thead><tr><th>Role</th><th>Games</th><th>Evil cover</th><th>Good cover</th><th>Not in play</th></tr></thead>
+          <tbody id="townsfolk-roles-body"></tbody>
         </table>
       </div>
     </div>
@@ -1610,6 +1709,12 @@ function renderSuperlatives() {{
       detail: s => `${{(s.win_rate*100).toFixed(0)}}% win rate (${{s.wins}}/${{s.total_games}} games)`,
       bg: "#0e2a1f",
     }},
+    {{
+      key: "most_oblivious_outsider", icon: "🫣", label: "Most Often Hidden Outsider",
+      name:   s => s.role,
+      detail: s => `Never revealed in ${{s.games_not_claimed}}/${{s.games}} games (${{(s.hidden_rate*100).toFixed(0)}}%)`,
+      bg: "#081318",
+    }},
   ];
 
   const grid = document.getElementById("sup-grid");
@@ -1768,82 +1873,30 @@ function renderFakeRoles() {{
 }}
 renderFakeRoles();
 
-// ── roles tables (split Evil / Good, collapsible) ─────────────────────────────
+// ── roles tables (split by type: Demon / Minion / Outsider / Townsfolk) ──────
 function renderRoles() {{
-  // Evil: 3-column table — Role | Games | Lie rate
-  function renderEvilRoles(roles) {{
+  // Generic collapsible table helper
+  // cols: array of {{fn(r) → html string}} descriptors
+  // sorted: pre-sorted array
+  function makeTable(tbodyId, sorted, cols, barColor) {{
     const LIMIT = 10;
     let expanded = false;
-    const tbody = document.getElementById("evil-roles-body");
-    function render() {{
-      if (!roles.length) {{
-        tbody.innerHTML = `<tr><td colspan="3" class="empty" style="padding:20px">—</td></tr>`;
-        return;
-      }}
-      tbody.innerHTML = '';
-      (expanded ? roles : roles.slice(0, LIMIT)).forEach(r => {{
-        const pct = (r.lie_rate * 100).toFixed(0);
-        tbody.innerHTML +=
-          `<tr>
-            <td style="font-weight:600">${{r.role}}</td>
-            <td>${{r.games}}</td>
-            <td>
-              <div class="rate-bar-wrap">
-                <div class="rate-bar">
-                  <div class="rate-bar-fill" style="width:${{pct}}%;background:#dc2626"></div>
-                </div>
-                <span style="font-size:.8rem;min-width:34px">${{pct}}%</span>
-              </div>
-            </td>
-          </tr>`;
-      }});
-      if (roles.length > LIMIT) {{
-        const tr = document.createElement('tr');
-        tr.className = 'showmore-row';
-        const td = document.createElement('td'); td.colSpan = 3;
-        const btn = document.createElement('button'); btn.className = 'showmore-btn';
-        btn.textContent = expanded ? '▲ Show fewer' : `▼ Show all ${{roles.length}} roles`;
-        btn.onclick = () => {{ expanded = !expanded; render(); }};
-        td.appendChild(btn); tr.appendChild(td); tbody.appendChild(tr);
-      }}
-    }}
-    render();
-  }}
-
-  // Good: 4-column table — Role | Games | Used as cover story | Lie rate
-  // sorted by games_claimed_by_other descending
-  function renderGoodRoles(roles) {{
-    const LIMIT = 10;
-    let expanded = false;
-    const sorted = [...roles].sort((a, b) => b.games_claimed_by_other - a.games_claimed_by_other);
-    const tbody = document.getElementById("good-roles-body");
+    const tbody = document.getElementById(tbodyId);
+    const ncols = cols.length;
     function render() {{
       if (!sorted.length) {{
-        tbody.innerHTML = `<tr><td colspan="4" class="empty" style="padding:20px">—</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="${{ncols}}" class="empty" style="padding:20px">—</td></tr>`;
         return;
       }}
       tbody.innerHTML = '';
       (expanded ? sorted : sorted.slice(0, LIMIT)).forEach(r => {{
-        const pct = (r.lie_rate * 100).toFixed(0);
-        tbody.innerHTML +=
-          `<tr>
-            <td style="font-weight:600">${{r.role}}</td>
-            <td>${{r.games}}</td>
-            <td>${{r.games_claimed_by_other}}</td>
-            <td>
-              <div class="rate-bar-wrap">
-                <div class="rate-bar">
-                  <div class="rate-bar-fill" style="width:${{pct}}%;background:#2563eb"></div>
-                </div>
-                <span style="font-size:.8rem;min-width:34px">${{pct}}%</span>
-              </div>
-            </td>
-          </tr>`;
+        const cells = cols.map(c => `<td>${{c.fn(r)}}</td>`).join('');
+        tbody.innerHTML += `<tr>${{cells}}</tr>`;
       }});
       if (sorted.length > LIMIT) {{
         const tr = document.createElement('tr');
         tr.className = 'showmore-row';
-        const td = document.createElement('td'); td.colSpan = 4;
+        const td = document.createElement('td'); td.colSpan = ncols;
         const btn = document.createElement('button'); btn.className = 'showmore-btn';
         btn.textContent = expanded ? '▲ Show fewer' : `▼ Show all ${{sorted.length}} roles`;
         btn.onclick = () => {{ expanded = !expanded; render(); }};
@@ -1853,8 +1906,68 @@ function renderRoles() {{
     render();
   }}
 
-  renderEvilRoles(DATA.roles.filter(r => r.team === "Evil"));
-  renderGoodRoles(DATA.roles.filter(r => r.team === "Good"));
+  function rateBar(pct, color) {{
+    return `<div class="rate-bar-wrap">
+      <div class="rate-bar"><div class="rate-bar-fill" style="width:${{pct}}%;background:${{color}}"></div></div>
+      <span style="font-size:.8rem;min-width:34px">${{pct}}%</span>
+    </div>`;
+  }}
+
+  // ── Demon: Role | Appeared | Won | Win rate ─────────────────────────────────
+  // Lie rate omitted — Demons always lie; win rate is the meaningful signal.
+  const demons = [...DATA.roles.filter(r => r.type === "Demon")]
+    .sort((a, b) => b.games - a.games);
+  makeTable("demon-roles-body", demons, [
+    {{ fn: r => `<span style="font-weight:600">${{r.role}}</span>` }},
+    {{ fn: r => r.games }},
+    {{ fn: r => r.wins != null ? r.wins : '—' }},
+    {{ fn: r => r.win_rate != null
+                 ? rateBar((r.win_rate * 100).toFixed(0), "#dc2626")
+                 : `<span style="color:var(--muted)">—</span>` }},
+  ]);
+
+  // ── Minion: Role | Appeared | Won | Lie rate ────────────────────────────────
+  // "Won" = games where Evil won while this Minion type was in play.
+  // "Times killed by Demon" not yet tracked in pipeline data.
+  const minions = [...DATA.roles.filter(r => r.type === "Minion")]
+    .sort((a, b) => b.games - a.games);
+  makeTable("minion-roles-body", minions, [
+    {{ fn: r => `<span style="font-weight:600">${{r.role}}</span>` }},
+    {{ fn: r => r.games }},
+    {{ fn: r => r.wins != null ? r.wins : '—' }},
+    {{ fn: r => rateBar((r.lie_rate * 100).toFixed(0), "#f97316") }},
+  ]);
+
+  // ── Outsider: Role | Games | Evil cover | Good cover ────────────────────────
+  // Evil players love bluffing Outsider roles (Drunk, Butler, Recluse…).
+  // Good cover = a non-holder Good player claimed this role (e.g. coordination bluff).
+  // "Never claimed" moved to Superlatives as most_oblivious_outsider.
+  const outsiders = [...DATA.roles.filter(r => r.type === "Outsider")]
+    .sort((a, b) => b.games_cover_evil - a.games_cover_evil);
+  makeTable("outsider-roles-body", outsiders, [
+    {{ fn: r => `<span style="font-weight:600">${{r.role}}</span>` }},
+    {{ fn: r => r.games }},
+    {{ fn: r => r.games_cover_evil
+                 ? `<span style="color:#fca5a5">${{r.games_cover_evil}}</span>` : '—' }},
+    {{ fn: r => r.games_cover_good
+                 ? `<span style="color:#93c5fd">${{r.games_cover_good}}</span>` : '—' }},
+  ]);
+
+  // ── Townsfolk: Role | Games | Evil cover | Good cover | Not in play ──────────
+  // Sorted by Evil cover desc so the juiciest bluff targets float to the top.
+  // "Not in play" = games where role was claimed but nobody actually held it.
+  const townsfolk = [...DATA.roles.filter(r => r.type === "Townsfolk")]
+    .sort((a, b) => b.games_cover_evil - a.games_cover_evil);
+  makeTable("townsfolk-roles-body", townsfolk, [
+    {{ fn: r => `<span style="font-weight:600">${{r.role}}</span>` }},
+    {{ fn: r => r.games }},
+    {{ fn: r => r.games_cover_evil
+                 ? `<span style="color:#fca5a5">${{r.games_cover_evil}}</span>` : '—' }},
+    {{ fn: r => r.games_cover_good
+                 ? `<span style="color:#93c5fd">${{r.games_cover_good}}</span>` : '—' }},
+    {{ fn: r => r.games_phantom
+                 ? `<span style="color:#c4b5fd;font-weight:600">${{r.games_phantom}}</span>` : '—' }},
+  ]);
 }}
 renderRoles();
 

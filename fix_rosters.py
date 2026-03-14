@@ -202,6 +202,20 @@ def all_issues(entries_key: tuple) -> list[dict]:
         except Exception:
             continue
 
+        # Load confirmed_duplicates from roster_overrides so intentional
+        # multi-player roles (e.g. two Amnesiacs) don't keep surfacing here.
+        overrides_path = OUTPUTS_DIR / vid / "roster_overrides.json"
+        confirmed_dups: set[str] = set()
+        if overrides_path.exists():
+            try:
+                ov = json.loads(overrides_path.read_text(encoding="utf-8"))
+                confirmed_dups = {
+                    r.lower().strip()
+                    for r in ov.get("confirmed_duplicates", [])
+                }
+            except Exception:
+                pass
+
         for p in players:
             for field in ("actual_role", "believed_role"):
                 raw = (p.get(field) or "").lower().strip()
@@ -225,7 +239,8 @@ def all_issues(entries_key: tuple) -> list[dict]:
             if key in seen:
                 continue
 
-            if actual and actual != "unknown" and role_counts[actual] > 1:
+            if actual and actual != "unknown" and role_counts[actual] > 1 \
+                    and actual not in confirmed_dups:
                 conflicts = [x for x in role_players[actual] if x != name]
                 issues.append({
                     "video_id": vid, "title": title, "members": members,

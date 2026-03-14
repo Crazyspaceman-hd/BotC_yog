@@ -455,46 +455,60 @@ def check_enrichment_artifacts(rpt: Report,
     targets  = [v for v in analyzed
                 if video_ids is None or v in video_ids]
 
-    n1_present = n2_valid = n3_valid = 0
-    n1_total   = len(targets)
+    n0_present = n1_present = n2_valid = n3_valid = 0
+    n_total    = len(targets)
     issues: list[str] = []
 
     for vid in targets:
         out = OUTPUTS_DIR / vid
+
+        # N0: frame_scan.json (visual frame scanner)
+        p_scan = out / "frame_scan.json"
+        if p_scan.exists():
+            try:
+                data = json.loads(p_scan.read_text(encoding="utf-8"))
+                if "frames" in data:
+                    n0_present += 1
+                else:
+                    issues.append(f"{vid}: frame_scan.json missing 'frames' key")
+            except Exception as exc:
+                issues.append(f"{vid}: frame_scan.json unreadable — {exc}")
 
         # N1: segments_consistent.csv
         p_cons = out / "segments_consistent.csv"
         if p_cons.exists():
             n1_present += 1
 
-        # N2: phase_labels.csv — check header and phase values
+        # N2: phase_labels.csv — check header, phase values, and round column
         p_phase = out / "phase_labels.csv"
         if p_phase.exists():
             try:
                 rows = list(_csv.DictReader(p_phase.open(encoding="utf-8")))
                 valid_phases = {"Intro", "Night", "Day", "Nomination", "Execution", "Unknown"}
                 bad = [r["phase"] for r in rows if r.get("phase") not in valid_phases]
+                has_round = rows and "round" in rows[0]
                 if bad:
                     issues.append(f"{vid}: phase_labels.csv has unrecognised phases: {bad[:3]}")
+                elif not has_round:
+                    issues.append(f"{vid}: phase_labels.csv missing 'round' column — re-run phases step")
                 else:
                     n2_valid += 1
             except Exception as exc:
                 issues.append(f"{vid}: phase_labels.csv unreadable — {exc}")
 
-        # N3: claims.csv + claim_graph.json
+        # N3: claims.csv (claim_graph.json is optional / not required by build_db)
         p_claims = out / "claims.csv"
-        p_graph  = out / "claim_graph.json"
-        if p_claims.exists() and p_graph.exists():
+        if p_claims.exists():
             try:
                 rows = list(_csv.DictReader(p_claims.open(encoding="utf-8")))
-                _ = json.loads(p_graph.read_text(encoding="utf-8"))
                 n3_valid += 1
             except Exception as exc:
-                issues.append(f"{vid}: claims artifact unreadable — {exc}")
+                issues.append(f"{vid}: claims.csv unreadable — {exc}")
 
-    summary = (f"N1 consistency: {n1_present}/{n1_total}  "
-               f"N2 phases: {n2_valid}/{n1_total}  "
-               f"N3 claims: {n3_valid}/{n1_total}")
+    summary = (f"N0 scan: {n0_present}/{n_total}  "
+               f"N1 consistency: {n1_present}/{n_total}  "
+               f"N2 phases: {n2_valid}/{n_total}  "
+               f"N3 claims: {n3_valid}/{n_total}")
     rpt.add(INFO, "enrichment:artifacts", summary)
 
     for issue in issues:
