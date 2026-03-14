@@ -6,6 +6,7 @@ Imported by: merge_segments.py, patch_transcript.py, analyze_roles.py,
 """
 
 import json
+import re
 from pathlib import Path
 
 # ── Playlist helpers ───────────────────────────────────────────────────────────
@@ -48,9 +49,49 @@ def load_player_aliases() -> dict[str, str]:
         return {}
 
 
+def normalize_player(name: str) -> str:
+    """Separator-collapsed lookup key for player names.
+
+    Lowercases and removes all whitespace, hyphens, underscores and dots so
+    that OCR / transcript variants that differ only in separators collapse to
+    the same key before alias lookup.
+
+    Examples:
+        'RT Game'  -> 'rtgame'
+        'rt-game'  -> 'rtgame'
+        'rt_game'  -> 'rtgame'
+        'RTGame'   -> 'rtgame'
+        'Nilesy'   -> 'nilesy'
+        'MsCupcakes' -> 'mscupcakes'
+    """
+    s = str(name).strip().lower()
+    return re.sub(r"[\s\-_\.]+", "", s)
+
+
 def resolve_player_name(name: str, aliases: dict[str, str]) -> str:
-    """Return canonical player name, applying alias if present."""
-    return aliases.get(name, aliases.get(name.lower(), name))
+    """Return canonical player name, applying alias if present.
+
+    Resolution order:
+      1. Exact key match in aliases.
+      2. Case-insensitive (``name.lower()``) match.
+      3. Separator-collapsed normalized match via ``normalize_player()``.
+      4. Return *name* unchanged.
+
+    Using normalize_player() on both sides means that 'RT Game', 'rt-game',
+    'rt_game', and 'RTGame' all resolve to the same canonical name as long
+    as any one of those forms is listed as an alias key.
+    """
+    if name in aliases:
+        return aliases[name]
+    lower = name.lower()
+    if lower in aliases:
+        return aliases[lower]
+    # Normalized fallback: strip separators and compare both sides.
+    key = normalize_player(name)
+    for alias, canonical in aliases.items():
+        if normalize_player(alias) == key:
+            return canonical
+    return name
 
 
 def parse_rttm(path: Path) -> list[tuple[float, float, str]]:

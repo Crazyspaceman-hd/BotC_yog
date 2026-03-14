@@ -225,13 +225,15 @@ def all_issues(entries_key: tuple) -> list[dict]:
         role_players: dict[str, list] = defaultdict(list)
         for p in players:
             r = p.get("actual_role", "")
-            n = p.get("name", "")
+            # Resolve name through aliases so that variants (e.g. "RT Game" vs
+            # "RTGame") are treated as the same player, not a duplicate.
+            n = resolve_player_name(p.get("name", ""), _PLAYER_ALIASES)
             if r and r != "unknown":
                 role_counts[r] += 1
                 role_players[r].append(n)
 
         for p in players:
-            name   = p.get("name", "")
+            name   = resolve_player_name(p.get("name", ""), _PLAYER_ALIASES)
             actual = p.get("actual_role", "")
             bel    = p.get("believed_role", "")
             ft     = float(p.get("frame_time", 0))
