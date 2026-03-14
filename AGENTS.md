@@ -13,9 +13,11 @@ for the full system architecture.
 | `docs/agent_rules.md` | Rules for agents working in this repo |
 | `docs/dataset_snapshot.md` | Current dataset state and known gaps |
 | `botc_ui.py` | Single source of truth for role data — never hardcode roles or teams |
-| `pipeline_utils.py` | Shared helpers — use `normalize_role()`, `display_role()`, `resolve_player_name()` |
+| `pipeline_utils.py` | Shared helpers — use `normalize_role()`, `display_role()`, `normalize_player()`, `resolve_player_name()` |
 | `build_db.py` | Rebuilds `botc.db` from outputs — run after any data change |
 | `validate.py` | End-state validator — run after any pipeline phase |
+| `scan_frames.py` | N0 enrichment: visual game-phase signal extraction from video frames |
+| `compare_rosters.py` | Diffs DB roster against the episode spreadsheet — track data gaps |
 
 ## Never do without being asked
 - Modify `botc.db` schema
@@ -26,6 +28,7 @@ for the full system architecture.
 - Rename pipeline scripts
 
 ## Branch conventions
+- `main` — stable; never push directly
 - `develop` — integration branch; merge features here before `main`
-- `feat/*` — feature branches; open PR to `develop` or `main`
+- `feat/*` — feature branches; open PR to `develop`
 - `gh-pages` — static landing page only; managed by `deploy_pages.sh`

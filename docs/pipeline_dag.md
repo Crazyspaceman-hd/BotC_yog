@@ -1,7 +1,7 @@
 # BotC_yog — Pipeline DAG
 
-> **Last updated:** 2026-03-06 (N1/N2/N3 added feat/nlp-enrichment)
-> **State:** covers all scripts present as of commit `44b2d3d`; N1–N3 are optional post-processing nodes added in feat/nlp-enrichment
+> **Last updated:** 2026-03-14
+> **State:** covers all scripts present on `develop` as of 2026-03-14; N0–N3 are optional enrichment nodes; player-name normalization via `normalize_player()` added to `pipeline_utils.py`
 
 ---
 
@@ -77,6 +77,8 @@ B+C ──► D. video.merge
          └─► [N2. speaker.day_boundary_detection] ← optional, writes phase_labels.csv
 
 A ──► F. video.scrape       (independent of B/C/D — reads video.mp4 directly)
+      |
+      └─► [N0. video.scan_frames]               ← optional, writes frame_scan rows to botc.db
 
 E+F ──► H. curation.auto_assign_speakers   (cross-video, reads E+F output)
          |
@@ -98,7 +100,7 @@ E/F+overrides ──► G. video.analyze
                    (any phase) ──► M. validate.end_state
 ```
 
-**N1/N2/N3 are optional enrichment nodes.** They do not affect playlist.json status, do not block any existing step, and are not required by J (build_db). They write new artifact files alongside existing outputs.
+**N0/N1/N2/N3 are optional enrichment nodes.** They do not affect playlist.json status, do not block any existing step, and are not required by J (build_db). N0 writes directly to `botc.db` (frame_scan table); N1–N3 write new artifact files alongside existing outputs.
 
 **Notes:**
 - `F. video.scrape` can run after `A. video.download` (only needs `video.mp4`).
@@ -262,7 +264,8 @@ extraction (e.g. a role claim in Day has different weight than one at Night).
 | **Acceptance** | `intro_roster.json` exists, is valid JSON, `players` array is non-empty |
 | **Downstream** | G, H |
 | **Prereqs** | `easyocr` or `pytesseract` installed; OpenCV |
-| **Notes** | Known non-standard formats: `DAb9sq5ku2k` (Bonus format — DO NOT re-scrape), `tf_LO5NKKUU`, `HQlYPDUfM4Q` (badge thresholds don't match), `F2f0nNeoWQM` (MPEG-TS in MP4 breaks OpenCV seek). Blind games have no reliable overlay — empty result is expected. |
+| **Flags** | `--force` re-scrapes (skips `manual_entry` files); `--force-manual` also overwrites `manual_entry` files — use with caution |
+| **Notes** | OCR pipeline: left-panel-only rule; HSV masking for both blue (Good) and red (Evil) nameplates; tight nameplate blob selection (height ≥30% crop + leftmost); coverage check in fuzzy match; 4 s name-persistence window. Protected manual rosters: `tf_LO5NKKUU`, `HQlYPDUfM4Q` (`source: manual_entry`). Non-standard: `DAb9sq5ku2k` (Bonus format — DO NOT re-scrape). Blind games return empty result (expected). |
 
 ---
 
@@ -369,7 +372,7 @@ extraction (e.g. a role claim in Day has different weight than one at Night).
 | **Inputs** | `playlist.json`, `botc.db`, `outputs/*/` artifact files |
 | **Outputs** | Console report; exit code 0 (pass/warn) or 1 (fail / --strict) |
 | **Command** | `python validate.py` \| `python validate.py --strict` \| `python validate.py --json` |
-| **Checks (27)** | prerequisites, DB schema/counts, role normalization, playlist sync, per-video artifacts, unlinked speakers, winner coverage, ghost dirs, pending processable, partial downloads, UI source, duplicate role sets |
+| **Checks (28)** | prerequisites, DB schema/counts, role normalization, playlist sync, per-video artifacts, unlinked speakers, winner coverage, ghost dirs, pending processable, partial downloads, UI source, duplicate role sets, enrichment artifact coverage |
 | **Pass/Warn/Fail** | PASS = check clean. WARN = data gap or manual action needed (non-blocking). FAIL = structural/code error (blocking). INFO = expected/acceptable state (blind games, optional files). |
 
 ---
@@ -432,6 +435,22 @@ bash scripts/run_all.sh
 
 ---
 
+## N0. video.scan_frames  [optional enrichment]
+
+| Field | Value |
+|-------|-------|
+| **Purpose** | Extract visual game-phase signals from video frames using HSV colour thresholding; writes results to `botc.db` `frame_scan` table |
+| **Script** | `scan_frames.py` |
+| **Per-video?** | Yes |
+| **Slot** | After A (download) — reads `video.mp4` directly |
+| **Inputs** | `outputs/<id>/video.mp4` |
+| **Outputs** | Rows in `botc.db`.`frame_scan` (timestamp, signal_type, confidence) |
+| **Command** | `python scan_frames.py <video_id>` |
+| **Acceptance** | `frame_scan` rows present for video; no errors |
+| **Notes** | Detects two persistent UI elements (scoreboard, town-square background) via normalised crop regions (resolution-independent). Non-destructive: existing outputs untouched. Coverage: 48/53 processable videos. |
+
+---
+
 ## N1. speaker.episode_consistency  [optional enrichment]
 
 | Field | Value |
@@ -485,7 +504,10 @@ bash scripts/run_all.sh
 | Script | Role |
 |--------|------|
 | `calibrate_scraper.py` | Visual tuning tool for OCR crop regions in `scrape_intro.py` |
+| `compare_rosters.py` | Diffs DB roster against the episode spreadsheet; fuzzy title matching |
 | `retranscribe_all.py` | Bulk re-transcribe all eligible videos (e.g. after model upgrade) |
+| `batch_transcribe.py` | Batch orchestration for retranscription runs with progress tracking |
+| `batch_downstream.py` | Batch orchestration for downstream (merge/patch/analyze) processing |
 | `explore.py` | Full Streamlit editor (read/write) — local only |
 | `explore_public.py` | Read-only Streamlit viewer — public-facing analysis UI |
 | `validate.py` | End-state validator — run after any pipeline phase |
@@ -495,17 +517,17 @@ bash scripts/run_all.sh
 
 ---
 
-## Known Data Gaps (as of 2026-03-06)
+## Known Data Gaps (as of 2026-03-14)
 
 | Video ID | Issue | Type | Path Forward |
 |----------|-------|------|-------------|
-| `DbF9CPOueTI` | Never processed | data | `python run_pipeline.py DbF9CPOueTI` |
-| `z79AJOPoNi4` | `audio.webm` present but no `audio.wav` — conversion interrupted | data | Re-run download with cookies: `python run_pipeline.py z79AJOPoNi4 --steps download --force` |
 | `0wGTes2sqmE` | 2 unlinked speakers; winner missing | manual | Watch video; set winner in `playlist.json`; run `fix_rosters.py` |
-| `ggM9BH__xtU` | Blind game; winner unknown | manual | Watch video; set winner in `playlist.json` |
-| `DzTk6kSIg-M` | 4 unlinked speakers | manual | `streamlit run fix_rosters.py` |
-| `IUO3Xz1kNkc` | 4 unlinked speakers | manual | `streamlit run fix_rosters.py` |
+| `DbF9CPOueTI` | Winner missing | manual | Watch video; set winner in `playlist.json` |
+| `OaAUvM4SAkg` | Winner missing | manual | Watch video; set winner in `playlist.json` |
+| `ggM9BH__xtU` | Blind game; winner unknown; no intro roster | manual | Watch video; set winner in `playlist.json` |
 | `OPqWyO7h-wM` | 1 unlinked speaker | manual | `streamlit run fix_rosters.py` |
 | `QbzFmlScLSA` | 3 unlinked speakers | manual | `streamlit run fix_rosters.py` |
-| `DAb9sq5ku2k` | Members bonus game; only 4 of 14 claims verified | data/manual | Manual `roster_overrides.json` — low priority |
-| `z79AJOPoNi4`, `OaAUvM4SAkg` | Members-only; no audio | access | Download manually with valid membership cookies |
+| `DzTk6kSIg-M` | 4 unlinked speakers | manual | `streamlit run fix_rosters.py` |
+| `IUO3Xz1kNkc` | 4 unlinked speakers | manual | `streamlit run fix_rosters.py` |
+| `DAb9sq5ku2k` | Bonus format; only 4/14 claims verified | data/manual | Manual `roster_overrides.json` — low priority |
+| `d2M-N5iABRo`, `OYTaTtjk3ac`, `z79AJOPoNi4` | Members-only; no audio | access | Download with valid membership cookies |
