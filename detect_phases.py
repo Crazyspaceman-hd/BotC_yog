@@ -1,13 +1,23 @@
 """detect_phases.py — N2 (phase_detection): Game-phase boundary detection (state-machine edition).
 
 Reads segments_consistent.csv (or segments_patched.csv / segments.csv) and
-produces phase_labels.csv labelling each interval of the episode as one of:
+produces TWO output files:
 
-    Intro        — pre-game introductions (players announce their roles)
-    Night        — storyteller resolves night actions
-    Day          — open discussion phase
-    Nomination   — nomination / voting window
-    Execution    — execution announcement
+  phase_labels.csv   — broad game-phase intervals, one of:
+                           Intro   pre-game introductions
+                           Night   storyteller resolves night actions
+                           Day     open discussion (includes nominations/votes)
+
+  day_events.csv     — timestamped events detected inside Day intervals:
+                           NominationStart        ST opens nominations / first "I nominate"
+                           VoteSequence           active voting window (frame_scan or keyword)
+                           ExecutionAnnouncement  ST declares execution result
+                           StorytellerInterruption ST-only speech burst within Day
+                           DayEnd                 last moment of Day before Night
+
+Nomination and Execution are NO LONGER top-level phases; they are events
+anchored inside Day.  This eliminates false Nomination tails and keeps the
+broad-phase model clean for downstream consumers.
 
 Algorithm
 ---------
@@ -24,25 +34,26 @@ Algorithm
    a. Maintain current_phase and phase_start_t.
    b. At each interval midpoint, filter active triggers for the current
       source phase, then score all candidate phases via _score_window.
-   c. Transition gating: only ALLOWED_TRANSITIONS from the current phase
-      are eligible candidate next phases.
+   c. Transition gating: only ALLOWED_TRANSITIONS (Intro/Night/Day) from
+      the current phase are eligible candidate next phases.
    d. Inertia: the current phase receives an INERTIA_BONUS on top of its
       raw evidence score.  A candidate must beat (current_score +
       INERTIA_BONUS) to trigger a switch — biasing toward staying.
    e. MIN_SCORE thresholds: strong cues require MIN_SCORE_STRONG, weak
       cues require MIN_SCORE_WEAK.  A candidate below its threshold is
       ignored even if it is the top scorer.
-   f. Nomination timeout: if in Nomination for > MAX_NOMINATION_S with no
-      fresh evidence in the last NOMINATION_REFRESH_S window, suppress
-      Nomination so the machine can transition away.
-   g. Intro stability: within INTRO_CUTOFF_S only storyteller_triggers are
+   f. Intro stability: within INTRO_CUTOFF_S only storyteller_triggers are
       used; the machine stays in Intro until INTRO_CUTOFF_S elapses and
       silently promotes to Day.
 4. Collapse consecutive same-phase intervals.
 5. Absorb islands shorter than MIN_PHASE_S into their longer neighbour.
 6. Final collapse pass.
+7. Detect day-scoped events (_detect_day_events) using nomination/execution
+   keyword patterns and frame_scan votes_visible windows.  Write day_events.csv.
 
-Output columns: start, end, phase, confidence, evidence
+Output columns:
+  phase_labels.csv  start, end, phase, round, confidence, evidence
+  day_events.csv    start, end, round, event, confidence, evidence
 
 Usage:
     python detect_phases.py <video_id>
@@ -75,18 +86,16 @@ MIN_SCORE_WEAK   = 0.40   # weak cues must accumulate
 # ── State machine constants ────────────────────────────────────────────────────
 # Legal next phases from each current phase.  A candidate not in the
 # allowed list is ignored even if it has a high evidence score.
-# This encodes the standard BotC game arc:
-#   Intro → Day → Nomination → Execution (opt) → Night → Day → ...
+# This encodes the standard BotC game arc at the broad-phase level:
+#   Intro → Day → Night → Day → ...
 #
-# Night → Nomination is also allowed as a shortcut for games where the Day
-# between Night and Nominations is too brief to generate detectable evidence
-# (e.g. the storyteller jumps straight from morning-reveal into nominations).
+# Nomination and Execution are detected as day-scoped EVENTS in day_events.csv
+# and are no longer top-level phases.  Day absorbs what was previously labelled
+# as Nomination and Execution phase.
 ALLOWED_TRANSITIONS: dict[str, list[str]] = {
-    "Intro":      ["Day", "Night"],
-    "Day":        ["Nomination", "Night"],
-    "Nomination": ["Execution", "Night", "Day"],   # Day: nomination may fail / resume
-    "Execution":  ["Night", "Day"],
-    "Night":      ["Day", "Nomination"],
+    "Intro": ["Day", "Night"],
+    "Day":   ["Night"],
+    "Night": ["Day"],
 }
 
 # Raw-score bonus added to the current-phase score when comparing against
@@ -107,30 +116,9 @@ INERTIA_BONUS_EXIT = 0.02
 # has a strong cue.  These cover the sticky boundaries where in-phase
 # evidence commonly competes with legitimate exit announcements.
 _EXIT_INERTIA_PAIRS: frozenset[tuple[str, str]] = frozenset({
-    ("Night",      "Day"),
-    ("Night",      "Nomination"),
-    ("Nomination", "Execution"),
-    ("Execution",  "Night"),
-    ("Execution",  "Day"),
+    ("Night", "Day"),
+    ("Day",   "Night"),
 })
-
-# Transitions that require at least one STRONG cue to fire.  Weak cues
-# (player chatter, incidental phrases) will not trigger these even if they
-# accumulate above MIN_SCORE_WEAK.  This prevents in-phase ST commentary
-# (e.g. "good morning" addressed to a player mid-Nomination) from
-# prematurely resetting a phase.
-# Note: most morning/wakeup cues are already excluded from Nomination by their
-# allowed_source_phases; this guard catches any remaining weak cues.
-_STRONG_ONLY_TRANSITIONS: frozenset[tuple[str, str]] = frozenset({
-    ("Nomination", "Day"),   # needs an explicit ST day-boundary announcement
-})
-
-# Soft timeout for the Nomination phase.  If we have been in Nomination for
-# longer than MAX_NOMINATION_S with no fresh nomination evidence in the last
-# NOMINATION_REFRESH_S, suppress Nomination from the candidate pool so the
-# machine can naturally transition away (handles long recap / outro tails).
-MAX_NOMINATION_S     = 480.0   # 8 minutes
-NOMINATION_REFRESH_S = 120.0   # 2-minute freshness window
 
 # ── Structural (speaker-pattern) signal constants ─────────────────────────────
 # Structural triggers are generated from speaker-count patterns in the segment
@@ -148,15 +136,6 @@ NOMINATION_REFRESH_S = 120.0   # 2-minute freshness window
 STRUCT_STEP_S  = 15.0   # sampling interval for structural trigger generation (s)
 STRUCT_NIGHT_W = 0.30   # Night trigger weight: ST + 1 player window
 STRUCT_DAY_W   = 0.25   # Day trigger weight: ≥2 non-ST speakers in window
-
-# ── Cue-cluster constants ──────────────────────────────────────────────────────
-# When a _FROM_NIGHT_ONLY restricted Day cue (e.g. "welcome back to town") co-
-# occurs with explicit death-confirmation language during Nomination, the
-# combination strongly implies an execution just resolved and Day has resumed.
-# Injecting CUE_CLUSTER_BONUS into Day (marked strong) lets the restricted cue
-# still drive Nomination→Day without relaxing the source-phase restriction that
-# prevents the false-fire regression in DzTk6kSIg-M.
-CUE_CLUSTER_BONUS = 0.30
 
 # ── Boundary-sharpening constants ─────────────────────────────────────────────
 # When sharpening Night/Day boundary timestamps we search this far either side
@@ -232,10 +211,7 @@ _DEATH_LANGUAGE_RE: re.Pattern = re.compile(
 # Convenience constants for common source-phase restrictions:
 _FROM_NIGHT_ONLY: frozenset[str] = frozenset({"Night", "Intro"})
 # ^ Morning/wake cues: only meaningful when exiting Night (or Intro Night-0 setup).
-#   Excluded when the machine is already in Day, Nomination, or Execution.
-
-_FROM_NOMINATION_ONLY: frozenset[str] = frozenset({"Nomination"})
-# ^ Vote-outcome cues: only arise immediately after a Nomination vote resolves.
+#   Excluded when the machine is already in Day.
 
 _SIGNALS: list[tuple[re.Pattern, str, float, bool, bool, frozenset[str] | None]] = []
 
@@ -310,32 +286,44 @@ _sig(r"\bit(?:'s| is) (?:now )?(?:the )?morning\b",      "Day",   0.8, storytell
 _sig(r"\blast night\b",                                  "Day",   0.35, storyteller_only=False, strong=False)
 _sig(r"\bovernight\b",                                   "Day",   0.30, storyteller_only=False, strong=False)
 
-# ── Nomination ─────────────────────────────────────────────────────────────────
-# Strong: ST procedural cues
-_sig(r"\bnominations?(?: are| is)? open\b",              "Nomination", 1.0, storyteller_only=True,  strong=True)
-_sig(r"\bvote(?:s)?(?: are| is)? open\b",                "Nomination", 0.9, storyteller_only=True,  strong=True)
-_sig(r"\btime to (?:vote|nominate)\b",                   "Nomination", 0.8, storyteller_only=True,  strong=True)
-_sig(r"\bwho (?:do you |would you )?nominate\b",         "Nomination", 0.7, storyteller_only=True,  strong=True)
-# Weak: player-initiated (valid but require accumulation)
-_sig(r"\bi nominate\b",                                  "Nomination", 0.6, storyteller_only=False, strong=False)
-_sig(r"\bput(?:ting)? (?:\w+ )?on the block\b",          "Nomination", 0.5, storyteller_only=False, strong=False)
+# ── Day-event signal patterns ─────────────────────────────────────────────────
+# These patterns are NOT used by the broad-phase state machine.  They are used
+# by _detect_day_events() to emit NominationStart / ExecutionAnnouncement events
+# within Day intervals.  Kept here alongside the phase signals for readability.
 
-# ── Execution ──────────────────────────────────────────────────────────────────
-# Core verdict / confirmation phrases: unambiguous regardless of source phase.
-_sig(r"\bhas been executed\b",                           "Execution", 1.0, storyteller_only=True,  strong=True)
-_sig(r"\byou(?:'ve| have) been executed\b",              "Execution", 1.0, storyteller_only=True,  strong=True)
-_sig(r"\bwas executed\b",                                "Execution", 0.9, storyteller_only=True,  strong=True)
-_sig(r"\bexecution (?:is )?complete\b",                  "Execution", 0.9, storyteller_only=True,  strong=True)
-_sig(r"\bput to death\b",                                "Execution", 0.8, storyteller_only=True,  strong=True)
-_sig(r"\bthe vote (?:passed|carries)\b",                 "Execution", 0.7, storyteller_only=True,  strong=True)
-_sig(r"\bis now dead\b",                                 "Execution", 0.8, storyteller_only=True,  strong=True)
-# Vote-outcome cues, nomination-exit only: these phrases could plausibly appear
-# in post-game discussion from phases other than Nomination; restricting them
-# to _FROM_NOMINATION_ONLY avoids spurious Execution islands outside vote windows.
-_sig(r"\bvoted (?:out|off)\b",                           "Execution", 0.8, storyteller_only=False, strong=True,
-     allowed_source_phases=_FROM_NOMINATION_ONLY)
-_sig(r"\bgets? (?:executed|the axe)\b",                  "Execution", 0.8, storyteller_only=True,  strong=True,
-     allowed_source_phases=_FROM_NOMINATION_ONLY)
+# NominationStart — ST opens nominations; player nominates
+_NOM_STRONG_RE: re.Pattern = re.compile(
+    r"\b(?:"
+    r"nominations?(?:\s+are|\s+is)?\s+open"
+    r"|votes?\s+(?:are|is)\s+open"
+    r"|time\s+to\s+(?:vote|nominate)"
+    r"|who\s+(?:do\s+you\s+|would\s+you\s+)?nominate"
+    r")\b",
+    re.I,
+)
+_NOM_WEAK_RE: re.Pattern = re.compile(
+    r"\b(?:"
+    r"i\s+nominate"
+    r"|put(?:ting)?\s+\w+\s+on\s+the\s+block"
+    r")\b",
+    re.I,
+)
+
+# ExecutionAnnouncement — ST declares the result; vote resolves
+_EXEC_RE: re.Pattern = re.compile(
+    r"\b(?:"
+    r"has\s+been\s+executed"
+    r"|you(?:'ve|\s+have)\s+been\s+executed"
+    r"|was\s+executed"
+    r"|execution\s+(?:is\s+)?complete"
+    r"|put\s+to\s+death"
+    r"|the\s+vote\s+(?:passed|carries)"
+    r"|is\s+now\s+dead"
+    r"|voted\s+(?:out|off)"
+    r"|gets?\s+(?:executed|the\s+axe)"
+    r")\b",
+    re.I,
+)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -606,48 +594,6 @@ def _apply_state_machine(
         # ── Score all phases at this midpoint ─────────────────────────────────
         phase_scores = _score_window(interval_mid, active_triggers)
 
-        # ── Nomination timeout suppression ────────────────────────────────────
-        if (current_phase == "Nomination"
-                and (interval_mid - phase_start_t) > MAX_NOMINATION_S):
-            nomination_is_fresh = any(
-                True
-                for trig in all_triggers
-                if trig[1] == "Nomination"
-                and (interval_mid - NOMINATION_REFRESH_S) <= trig[0] <= interval_mid
-            )
-            if not nomination_is_fresh:
-                phase_scores.pop("Nomination", None)
-
-        # ── Cue-cluster: restricted Day cue + death reveal → Nomination→Day ──
-        # "welcome back to town" et al. are _FROM_NIGHT_ONLY to block the
-        # DzTk6kSIg-M false-fire (casual mid-Nomination use with no death).
-        # When the phrase co-occurs with death-confirmation language (e.g.
-        # "you died" / "I'm dead") the combination marks a genuine execution
-        # reveal; inject CUE_CLUSTER_BONUS so Day can still win (e.g. _EGJi3wg0bE).
-        if current_phase == "Nomination":
-            restricted_day_cue_nearby = any(
-                trig[1] == "Day"
-                and trig[5] is not None
-                and current_phase not in trig[5]
-                and abs(interval_mid - trig[0]) <= CONTEXT_S
-                for trig in raw_triggers
-            )
-            if restricted_day_cue_nearby:
-                death_reveal_nearby = any(
-                    _DEATH_LANGUAGE_RE.search(row["text"])
-                    for row in rows
-                    if abs(interval_mid - float(row["start"])) <= CONTEXT_S
-                )
-                if death_reveal_nearby:
-                    existing_sc, _, existing_ev = phase_scores.get(
-                        "Day", (0.0, False, "")
-                    )
-                    phase_scores["Day"] = (
-                        existing_sc + CUE_CLUSTER_BONUS,
-                        True,
-                        existing_ev or "co-occurrence: day-start cue + death reveal",
-                    )
-
         # ── Intro window: fully locked until INTRO_CUTOFF_S ──────────────────
         # Intro is treated as a fixed block; no phase transitions are evaluated
         # within it.  This prevents both player chatter ("night one" during
@@ -678,21 +624,6 @@ def _apply_state_machine(
                 best_candidate_score     = cand_score
                 best_candidate_evidence  = cand_evidence
                 best_candidate_is_strong = cand_has_strong
-
-        # Enforce strong-only constraint on certain transitions.
-        # Some phase exits (e.g. Nomination→Day) must not be triggered by weak
-        # cues alone (e.g. ST saying "good morning" to a player mid-Nomination).
-        # Only a STRONG cue — an unambiguous boundary announcement such as
-        # "nobody died" — may fire these transitions.  Most morning/wakeup cues
-        # are already excluded from Nomination by their allowed_source_phases;
-        # this guard catches any remaining weak cues that slip through.
-        if (best_candidate_phase is not None
-                and not best_candidate_is_strong
-                and (current_phase, best_candidate_phase) in _STRONG_ONLY_TRANSITIONS):
-            best_candidate_phase     = None
-            best_candidate_score     = 0.0
-            best_candidate_evidence  = ""
-            best_candidate_is_strong = False
 
         # Current phase score (raw, before inertia bonus).
         current_phase_score, _, current_phase_evidence = phase_scores.get(
@@ -837,45 +768,146 @@ def _load_votes_windows(out_dir: Path, interval_s: float = 30.0) -> list[tuple[f
     return [(max(0.0, s), e) for s, e in windows]
 
 
-def _apply_votes_overrides(
-    labeled_intervals: list[tuple[float, float, str, float, str]],
+def _detect_day_events(
+    rows: list[dict],
+    storyteller_id: str | None,
+    numbered_intervals: list[tuple[float, float, str, float, str, int]],
     votes_windows: list[tuple[float, float]],
-) -> list[tuple[float, float, str, float, str]]:
-    """Hard-stamp intervals overlapping votes_windows as Nomination (conf=1.0).
+) -> list[dict]:
+    """Detect timestamped events within Day intervals and return event dicts.
 
-    Each overlapping interval is split into up to three pieces:
-      [pre-window part]  original phase
-      [window overlap]   Nomination, confidence=1.0
-      [post-window part] original phase
-    Applied after all NLP post-processing so _merge_short cannot absorb them.
+    Event types
+    -----------
+    NominationStart        — ST opens nominations or first "I nominate" heard.
+    VoteSequence           — Active voting window (from frame_scan or keyword cluster).
+    ExecutionAnnouncement  — ST declares the execution result.
+    StorytellerInterruption— ST-dominant speech burst (2-speaker window) within Day.
+    DayEnd                 — End of Day before Night; always emitted at Day boundary.
+
+    Sources (in priority order)
+    ---------------------------
+    1. frame_scan votes_visible windows  → NominationStart + VoteSequence (conf=1.0)
+    2. Keyword patterns in segments      → NominationStart / ExecutionAnnouncement
+    3. Structural speaker patterns       → StorytellerInterruption
+    4. Phase boundary                    → DayEnd (deterministic)
+
+    NominationStart events within 30 s of each other are deduplicated (highest
+    confidence wins); frame_scan ground-truth takes priority over keywords.
     """
-    if not votes_windows:
-        return labeled_intervals
+    # ── Build fast lookups from numbered phase intervals ──────────────────────
+    day_spans: list[tuple[float, float, int]] = [
+        (s, e, rnd)
+        for s, e, ph, _, _, rnd in numbered_intervals
+        if ph == "Day"
+    ]
 
-    result: list[tuple[float, float, str, float, str]] = []
-    for iv_start, iv_end, iv_phase, iv_conf, iv_ev in labeled_intervals:
-        overlaps = [
-            (max(ws, iv_start), min(we, iv_end))
-            for ws, we in votes_windows
-            if ws < iv_end and we > iv_start
-        ]
-        if not overlaps:
-            result.append((iv_start, iv_end, iv_phase, iv_conf, iv_ev))
+    def _day_rnd(t: float) -> tuple[bool, int]:
+        for ds, de, rnd in day_spans:
+            if ds <= t < de:
+                return True, rnd
+        return False, 0
+
+    events: list[dict] = []
+
+    # ── 1. frame_scan votes_visible windows ──────────────────────────────────
+    for ws, we in votes_windows:
+        mid = (ws + we) / 2.0
+        in_d, rnd = _day_rnd(mid)
+        if not in_d:
+            in_d, rnd = _day_rnd(ws)  # try window start if mid falls outside Day
+        nom_end = min(ws + 10.0, we)
+        events.append({
+            "start": round(ws, 3), "end": round(nom_end, 3),
+            "round": rnd, "event": "NominationStart",
+            "confidence": 1.0, "evidence": "frame_scan: votes table visible",
+        })
+        events.append({
+            "start": round(ws, 3), "end": round(we, 3),
+            "round": rnd, "event": "VoteSequence",
+            "confidence": 1.0, "evidence": "frame_scan: votes table visible",
+        })
+
+    # ── 2. Keyword-based NominationStart and ExecutionAnnouncement ────────────
+    for row in rows:
+        t        = float(row["start"])
+        text     = row["text"]
+        speaker  = row.get("speaker", "")
+        is_st    = (speaker == storyteller_id) if storyteller_id else False
+        in_d, rnd = _day_rnd(t)
+        if not in_d:
             continue
 
-        cursor = iv_start
-        for ov_start, ov_end in sorted(overlaps):
-            if cursor < ov_start:
-                result.append((cursor, ov_start, iv_phase, iv_conf, iv_ev))
-            result.append((
-                ov_start, ov_end,
-                "Nomination", 1.0, "frame_scan: votes table visible",
-            ))
-            cursor = ov_end
-        if cursor < iv_end:
-            result.append((cursor, iv_end, iv_phase, iv_conf, iv_ev))
+        # NominationStart — skip if already covered by frame_scan window
+        already_covered = any(ws <= t <= we for ws, we in votes_windows)
+        if not already_covered:
+            if is_st and _NOM_STRONG_RE.search(text):
+                events.append({
+                    "start": round(t, 3), "end": round(t + 10.0, 3),
+                    "round": rnd, "event": "NominationStart",
+                    "confidence": 0.9, "evidence": text[:80].replace("\n", " "),
+                })
+            elif _NOM_WEAK_RE.search(text):
+                events.append({
+                    "start": round(t, 3), "end": round(t + 10.0, 3),
+                    "round": rnd, "event": "NominationStart",
+                    "confidence": 0.6, "evidence": text[:80].replace("\n", " "),
+                })
 
-    return result
+        # ExecutionAnnouncement — both ST and players (e.g. "voted out")
+        if _EXEC_RE.search(text) and (is_st or "voted" in text.lower()
+                                       or "executed" in text.lower()):
+            events.append({
+                "start": round(t, 3), "end": round(t + 5.0, 3),
+                "round": rnd, "event": "ExecutionAnnouncement",
+                "confidence": 0.9 if is_st else 0.7,
+                "evidence": text[:80].replace("\n", " "),
+            })
+
+    # ── 3. StorytellerInterruption — 2-speaker windows within Day ────────────
+    if storyteller_id and rows:
+        total_s = max(float(r["end"]) for r in rows)
+        t = 0.0
+        while t <= total_s:
+            in_d, rnd = _day_rnd(t)
+            if in_d:
+                active  = _speakers_in_window(t, rows, STRUCT_STEP_S)
+                n_total = len(active)
+                st_here = storyteller_id in active
+                if n_total == 2 and st_here:
+                    ev_start = max(0.0, t - STRUCT_STEP_S / 2)
+                    ev_end   = t + STRUCT_STEP_S / 2
+                    events.append({
+                        "start": round(ev_start, 3), "end": round(ev_end, 3),
+                        "round": rnd, "event": "StorytellerInterruption",
+                        "confidence": 0.6,
+                        "evidence": f"structural: ST + 1 player in Day at t={t:.0f}s",
+                    })
+            t += STRUCT_STEP_S
+
+    # ── 4. DayEnd — deterministic from Day/Night boundaries ──────────────────
+    for ds, de, rnd in day_spans:
+        events.append({
+            "start": round(de, 3), "end": round(de, 3),
+            "round": rnd, "event": "DayEnd",
+            "confidence": 0.95, "evidence": "Day/Night phase boundary",
+        })
+
+    # ── Deduplicate NominationStart — keep highest-confidence within 30 s ────
+    nom_events = sorted(
+        [e for e in events if e["event"] == "NominationStart"],
+        key=lambda e: e["start"],
+    )
+    deduped_noms: list[dict] = []
+    for ev in nom_events:
+        if deduped_noms and ev["start"] - deduped_noms[-1]["start"] < 30.0:
+            if ev["confidence"] > deduped_noms[-1]["confidence"]:
+                deduped_noms[-1] = ev
+        else:
+            deduped_noms.append(ev)
+
+    other_events = [e for e in events if e["event"] != "NominationStart"]
+    events = sorted(other_events + deduped_noms, key=lambda e: e["start"])
+    return events
 
 
 # ── Boundary sharpening (frame_scan header + ST keywords) ─────────────────────
@@ -1017,23 +1049,17 @@ def _number_rounds(
 ) -> list[tuple[float, float, str, float, str, int]]:
     """Assign game round numbers and return 6-tuples (..., round).
 
-    A round groups one Day (possibly interrupted by Nominations) and its
-    following Night together under the same number.  The round increments
-    only when a Day phase begins after a Night — NOT on every Day interval
-    (because Nomination→Day resumes the same game day, not a new one).
+    A round groups one Day and its following Night under the same number.
+    The round increments only when a Day phase begins after a Night.
 
     Intro is always round 0.
 
     Example:
-        Intro          round=0
-        Day            round=1   ← first Day starts round 1
-        Nomination     round=1   ← same game day
-        Day            round=1   ← nominations over, day resumes
-        Nomination     round=1
-        Night          round=1   ← Night 1 belongs to round 1
-        Day            round=2   ← Night ended → new round
-        Nomination     round=2
-        Night          round=2   ← Night 2 belongs to round 2
+        Intro   round=0
+        Day     round=1   ← first Day starts round 1
+        Night   round=1   ← Night 1 belongs to round 1
+        Day     round=2   ← Night ended → new round
+        Night   round=2   ← Night 2 belongs to round 2
     """
     current_round = 0
     came_from_night = False   # True while the last non-Intro phase was Night
@@ -1050,8 +1076,8 @@ def _number_rounds(
         elif phase == "Night":
             came_from_night = True
             rnd = current_round   # Night belongs to the same round as its Day
-        else:  # Nomination, Execution — part of the current day
-            came_from_night = False
+        else:
+            # Unknown / forward-compat: keep current round
             rnd = current_round
         result.append((iv_start, iv_end, phase, conf, ev, rnd))
     return result
@@ -1060,8 +1086,9 @@ def _number_rounds(
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def main(video_id: str, force: bool = False) -> None:
-    out_dir  = Path("outputs") / video_id
-    out_path = out_dir / "phase_labels.csv"
+    out_dir        = Path("outputs") / video_id
+    out_path       = out_dir / "phase_labels.csv"
+    events_path    = out_dir / "day_events.csv"
 
     if out_path.exists() and not force:
         print(f"  [SKIP] phase_labels.csv already exists for {video_id}")
@@ -1109,20 +1136,18 @@ def main(video_id: str, force: bool = False) -> None:
     labeled_intervals = _merge_short(labeled_intervals, MIN_PHASE_S)
     labeled_intervals = _collapse(labeled_intervals)
 
-    # ── Visual ground-truth override (N0 frame_scan) ──────────────────────────
-    # votes_visible=True windows from scan_frames.py are hard Nomination ground
-    # truth.  Applied after NLP post-processing so _merge_short cannot absorb
-    # them; a final _collapse merges any adjacent Nomination intervals.
+    # ── Visual ground-truth (N0 frame_scan) ───────────────────────────────────
+    # votes_visible=True windows are used for day-event anchoring, NOT for
+    # overriding phase_labels (Nomination is no longer a top-level phase).
     frame_scan_samples = _load_frame_scan(out_dir)
     votes_windows = _load_votes_windows(out_dir)
     if votes_windows:
         print(
-            f"  Visual override: {len(votes_windows)} votes-visible window(s) from frame_scan.json"
+            f"  frame_scan: {len(votes_windows)} votes-visible window(s) "
+            f"-> will anchor NominationStart / VoteSequence events"
         )
-        labeled_intervals = _apply_votes_overrides(labeled_intervals, votes_windows)
-        labeled_intervals = _collapse(labeled_intervals)
     else:
-        print("  Visual override: no frame_scan.json (or no votes_visible frames) — NLP only")
+        print("  frame_scan: absent or no votes_visible frames — keyword-only event detection")
 
     # ── Boundary sharpening (header transitions + ST keywords) ────────────────
     # Refines Night/Day start timestamps from ±60 s NLP accuracy to the exact
@@ -1133,6 +1158,10 @@ def main(video_id: str, force: bool = False) -> None:
         labeled_intervals = _sharpen_boundaries(
             labeled_intervals, frame_scan_samples, rows, storyteller_id
         )
+        # Sharpening can create sub-MIN_PHASE_S islands (e.g. a 1-second Day
+        # between a sharpened Intro end and a sharpened Night start). Re-merge.
+        labeled_intervals = _merge_short(labeled_intervals, MIN_PHASE_S)
+        labeled_intervals = _collapse(labeled_intervals)
         print(f"  Boundary sharpening: {n_transitions} header transition(s) available")
     else:
         print("  Boundary sharpening: skipped (no frame_scan header transitions)")
@@ -1143,6 +1172,7 @@ def main(video_id: str, force: bool = False) -> None:
     phase_summary = Counter(iv[2] for iv in numbered)
     print(f"  Output intervals: {len(numbered)}  phases: {dict(phase_summary)}")
 
+    # ── Write phase_labels.csv ────────────────────────────────────────────────
     with out_path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(
             f, fieldnames=["start", "end", "phase", "round", "confidence", "evidence"]
@@ -1155,13 +1185,36 @@ def main(video_id: str, force: bool = False) -> None:
                 "confidence": iv_conf, "evidence": iv_ev,
             })
 
-    print(f"\n  Wrote {len(numbered)} rows -> {out_path}")
-    print("\n  Sample (first 10 rows):")
-    for iv in numbered[:10]:
+    print(f"  Wrote {len(numbered)} rows -> {out_path}")
+
+    # ── Detect and write day_events.csv ───────────────────────────────────────
+    day_events = _detect_day_events(rows, storyteller_id, numbered, votes_windows)
+    event_summary = Counter(e["event"] for e in day_events)
+    print(f"  Day events: {len(day_events)}  types: {dict(event_summary)}")
+
+    with events_path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f, fieldnames=["start", "end", "round", "event", "confidence", "evidence"]
+        )
+        writer.writeheader()
+        for ev in day_events:
+            writer.writerow(ev)
+
+    print(f"  Wrote {len(day_events)} rows -> {events_path}")
+
+    print("\n  Sample phase_labels (first 8 rows):")
+    for iv in numbered[:8]:
         iv_start, iv_end, iv_phase, iv_conf, iv_ev, iv_round = iv
         print(
             f"    {iv_start:8.1f}s - {iv_end:8.1f}s"
             f"  {iv_phase:12s}  rnd={iv_round}  conf={iv_conf:.2f}  \"{iv_ev[:50]}\""
+        )
+    print("\n  Sample day_events (first 8 rows):")
+    for ev in day_events[:8]:
+        print(
+            f"    {ev['start']:8.1f}s - {ev['end']:8.1f}s"
+            f"  {ev['event']:24s}  rnd={ev['round']}  conf={ev['confidence']:.2f}"
+            f"  \"{ev['evidence'][:40]}\""
         )
 
 

@@ -113,18 +113,35 @@ CREATE TABLE IF NOT EXISTS roles (
     type  TEXT NOT NULL      -- 'Townsfolk' | 'Outsider' | 'Minion' | 'Demon' | 'Traveller' | 'Fabled'
 );
 
--- N2: game-phase boundaries (from detect_phases.py)
+-- N2: broad game-phase boundaries (from detect_phases.py)
+-- Phases: 'Intro' | 'Night' | 'Day'
+-- Nomination and Execution are no longer top-level phases; see day_events.
 CREATE TABLE IF NOT EXISTS phase_labels (
     rowid      INTEGER PRIMARY KEY,
     video_id   TEXT NOT NULL REFERENCES videos(id),
     start      REAL,
     end        REAL,
-    phase      TEXT,        -- 'Intro' | 'Night' | 'Day' | 'Nomination' | 'Execution'
+    phase      TEXT,        -- 'Intro' | 'Night' | 'Day'
     round      INTEGER DEFAULT 0,  -- game round (Day 1=1, Night 1=1, Day 2=2 …)
     confidence REAL,
     evidence   TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_phase_vid ON phase_labels(video_id);
+
+-- N2b: day-scoped events (from detect_phases.py)
+-- Events within Day: NominationStart, VoteSequence, ExecutionAnnouncement,
+--                    StorytellerInterruption, DayEnd
+CREATE TABLE IF NOT EXISTS day_events (
+    rowid      INTEGER PRIMARY KEY,
+    video_id   TEXT NOT NULL REFERENCES videos(id),
+    start      REAL,
+    end        REAL,
+    round      INTEGER DEFAULT 0,
+    event      TEXT,        -- see event types above
+    confidence REAL,
+    evidence   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_devents_vid ON day_events(video_id);
 
 -- N0: visual frame scan (from scan_frames.py) — header bar + votes table visibility
 CREATE TABLE IF NOT EXISTS frame_scan (
@@ -352,6 +369,26 @@ def build(db_path: Path) -> None:
             )
             phase_total += len(rows)
 
+    # ── day_events (N2b — from detect_phases.py) ─────────────────────────────
+    devents_total = 0
+    for e in entries:
+        vid = e["id"]
+        devents_csv = Path("outputs") / vid / "day_events.csv"
+        if devents_csv.exists():
+            con.execute("DELETE FROM day_events WHERE video_id = ?", (vid,))
+            rows = read_csv(devents_csv)
+            con.executemany(
+                "INSERT INTO day_events(video_id, start, end, round, event, confidence, evidence) "
+                "VALUES (?,?,?,?,?,?,?)",
+                [
+                    (vid, float(r.get("start", 0)), float(r.get("end", 0)),
+                     int(r.get("round", 0)), r.get("event", ""),
+                     float(r.get("confidence", 0)), r.get("evidence", ""))
+                    for r in rows
+                ],
+            )
+            devents_total += len(rows)
+
     # ── claims (N3 — from extract_claims.py) ─────────────────────────────────
     claims_total = 0
     for e in entries:
@@ -446,8 +483,8 @@ def build(db_path: Path) -> None:
         f"\nDone. Built {db_path}  ({size_kb:,} KB)\n"
         f"  lies={lies_total:,}   segments={segs_total:,}   "
         f"roster_players={roster_total:,}   speaker_map={spkmap_total:,}\n"
-        f"  phase_labels={phase_total:,}   claims={claims_total:,}   "
-        f"frame_scan={fscan_total:,}   role_changes={rchg_total:,}"
+        f"  phase_labels={phase_total:,}   day_events={devents_total:,}   "
+        f"claims={claims_total:,}   frame_scan={fscan_total:,}   role_changes={rchg_total:,}"
     )
     print(f"  Built at: {datetime.now().isoformat(timespec='seconds')}")
 
