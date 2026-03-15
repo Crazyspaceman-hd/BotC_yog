@@ -79,6 +79,16 @@ _NIGHT_TARGET_CONF_BOOST: float = 0.05
 # Minimum confidence to emit a death event (anything below is silently dropped)
 _MIN_CONF: float = 0.45
 
+# Window for suppressing self-declaration false positives caused by the British-
+# English idiom "I'm dead" as a shocked reaction to another player's death.
+# If a high-confidence death signal fires for any OTHER player within this
+# window of a self-declaration, the self-declaration is discarded.
+_SELF_DECL_REACTION_WINDOW_S: float = 60.0
+
+# Minimum confidence of the OTHER player's signal required to trigger
+# self-declaration suppression. Filters accidental name mentions.
+_SELF_DECL_REACTION_MIN_CONF: float = 0.70
+
 # ── Status vocabulary ──────────────────────────────────────────────────────────
 
 STATUS_ALIVE = "alive"
@@ -570,6 +580,33 @@ def extract(video_id: str, force: bool = False) -> bool:
                     f" -> target '{matched_player}' found at {next_t:.1f}s"
                 )
                 break  # one target per kill-intent event
+
+    # ── Self-declaration reaction suppression ──────────────────────────────────
+    # "I'm dead" is common British slang for shock/disbelief.  When another
+    # player's confirmed death is announced within _SELF_DECL_REACTION_WINDOW_S
+    # of a self-declaration, the self-declaration is almost certainly a reaction
+    # ("I'm dead, I can't believe Nilesy died!") rather than a ghost status
+    # update.  Only non-self-declaration signals with conf >= threshold count as
+    # "confirmed death announcements" for this check.
+    other_deaths: list[tuple[float, str]] = [
+        (ct, opname)
+        for opname, cands in raw_candidates.items()
+        for ct, cconf, chint, _, _ in cands
+        if chint != "self_declaration" and cconf >= _SELF_DECL_REACTION_MIN_CONF
+    ]
+    for pname in list(raw_candidates.keys()):
+        filtered: list = []
+        for cand in raw_candidates[pname]:
+            ct, cconf, chint, csrc, cspk = cand
+            if chint == "self_declaration":
+                is_reaction = any(
+                    opname != pname and abs(ct - ot) <= _SELF_DECL_REACTION_WINDOW_S
+                    for ot, opname in other_deaths
+                )
+                if is_reaction:
+                    continue  # suppress: likely shocked reaction to another death
+            filtered.append(cand)
+        raw_candidates[pname] = filtered
 
     # ── Deduplicate: per player, collapse events within _DEDUP_WINDOW_S ────────
     death_events: list[dict] = []
