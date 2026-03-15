@@ -538,10 +538,10 @@ bash scripts/run_all.sh
 | **Per-video?** | Yes |
 | **Slot** | After G (analyze) — reads roster data, segments, and optional N2 phase labels + N0 frame scan |
 | **Inputs** | `segments_patched.csv` (fallback: `segments.csv`), `intro_roster.json`, `roster_overrides.json` (optional), `phase_labels.csv` (N2, optional), `day_events.csv` (N2b, optional), `frame_scan.json` (N0, optional) |
-| **Outputs** | `outputs/<id>/player_status.csv` (per-player status transitions), `outputs/<id>/death_events.csv` (one row per death) |
+| **Outputs** | `outputs/<id>/player_status.csv` (per-player status transitions), `outputs/<id>/death_events.csv` (one row per death), `outputs/<id>/name_resolution_debug.csv` (optional — emitted when ≥1 variant found) |
 | **Command** | `python extract_player_status.py <video_id>` \| `python extract_player_status.py --all` |
 | **Acceptance** | Both CSVs exist; `death_events.csv` `event_type` column contains only `{execution, night_death, uncertain_death}`; no rows with confidence below threshold |
-| **Notes** | Signal priority: visual (frame_scan `header_visible`) > ST transcript > general transcript. Storyteller detected as highest word-count speaker in first 330 s (mirrors N2). ST excluded from self-declaration path. Conservative: `_MIN_CONF=0.45`; prefers false negatives. Death cause classification uses N2 VoteSequence lookback (120 s) and Day-phase start window (600 s). `--force` flag to overwrite existing output. |
+| **Notes** | Signal priority: visual (frame_scan `header_visible`) > ST transcript > general transcript. Storyteller detected as highest word-count speaker in first 330 s (mirrors N2). ST excluded from self-declaration path. Conservative: `_MIN_CONF=0.45`; prefers false negatives. Death cause classification uses N2 VoteSequence lookback (120 s) and Day-phase start window (600 s). `--force` flag to overwrite existing output. **Transcript name normalization** (added 2026-03-15): per-video ASR variant discovery — alias variants from `player_aliases.json` and fuzzy variants (difflib `SequenceMatcher`, threshold 0.78, min length 5 chars for both token and player key) are added as regex patterns at `_VARIANT_CONF_SCALE=0.95`. Possessives and short-name ambiguities are filtered. Self-declaration false positives suppressed via 60 s reaction window. Short player names (≤4 chars) use alias-only matching. |
 
 ---
 

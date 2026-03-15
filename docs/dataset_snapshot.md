@@ -1,6 +1,6 @@
 # Dataset Snapshot
 
-> **Last updated:** 2026-03-15 (feat/player-status-tracking: N4 node added)
+> **Last updated:** 2026-03-15 (feat/player-status-tracking: N4 transcript name normalization)
 > Run `python validate.py` for the current end-state check.
 
 ---
@@ -31,7 +31,7 @@ Roster vs spreadsheet discrepancies: **115** (down from 128 pre-batch; majority 
 | N1 speaker_consistency | 52 / 53 | 1 missing |
 | N2 phase_detection | 53 / 53 | all covered |
 | N3 claim_extraction | 53 / 53 | 3 431 total claims |
-| N4 player_status | 2 / 53 | newly added; run `python extract_player_status.py --all` to expand |
+| N4 player_status | 50 / 53 | transcript name normalization added 2026-03-15; 3 missing = blind/members/empty roster |
 
 *(53 = total processable; 1 video is skip-flagged)*
 

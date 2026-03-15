@@ -33,13 +33,14 @@ from __future__ import annotations
 
 import argparse
 import csv
+import difflib
 import json
 import re
 import sqlite3
 from collections import defaultdict
 from pathlib import Path
 
-from pipeline_utils import load_player_aliases, resolve_player_name
+from pipeline_utils import load_player_aliases, normalize_player, resolve_player_name
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
@@ -78,6 +79,24 @@ _NIGHT_TARGET_CONF_BOOST: float = 0.05
 
 # Minimum confidence to emit a death event (anything below is silently dropped)
 _MIN_CONF: float = 0.45
+
+# ── Transcript name normalization ──────────────────────────────────────────────
+# ASR (Whisper) frequently mangles player names.  Rather than maintaining a
+# giant hand-curated alias file, we discover per-video transcript variants by:
+#   1. Reversing player_aliases.json to add alias-backed regex variants (high conf)
+#   2. Fuzzy-scanning all transcript tokens for close matches (lower conf)
+# Discovered variants augment pattern matching; they NEVER alone create events.
+
+# SequenceMatcher ratio threshold for accepting a fuzzy variant (0–1).
+# 0.78 accepts ~1–2 char differences in 6-char names; rejects short noise words.
+_FUZZY_NAME_THRESHOLD: float = 0.78
+
+# Minimum token length to attempt fuzzy name matching (avoids matching "nil", "bri").
+_FUZZY_MIN_TOKEN_LEN: int = 4
+
+# Confidence scale factor applied to pattern matches via alias/fuzzy variants.
+# Small penalty acknowledges minor additional uncertainty vs. exact canonical spelling.
+_VARIANT_CONF_SCALE: float = 0.95
 
 # Window for suppressing self-declaration false positives caused by the British-
 # English idiom "I'm dead" as a shocked reaction to another player's death.
@@ -315,47 +334,180 @@ def _header_visible_near(t: float, frame_scan: list[tuple[float, int]]) -> bool:
 # ── Pattern builder ────────────────────────────────────────────────────────────
 
 
-def _build_patterns(player_name: str) -> list[tuple[re.Pattern, float, str]]:
-    """Build (regex, confidence, event_hint) for one player name."""
-    parts: list[tuple[re.Pattern, float, str]] = []
-    # Escape the name; also build first-name only variant
-    tokens = player_name.strip().split()
-    name_variants = [re.escape(player_name)]
-    if len(tokens) > 1:
-        name_variants.append(re.escape(tokens[0]))  # first name only
+def _discover_name_variants(
+    players: list[str],
+    segs: list[dict],
+    aliases: dict[str, str],
+    threshold: float = _FUZZY_NAME_THRESHOLD,
+) -> tuple[dict[str, set[str]], list[dict]]:
+    """Scan transcript tokens to find ASR variant spellings of each player name.
 
-    for variant in name_variants:
+    Two-stage approach:
+      Stage 1 — alias: resolve each token via player_aliases.json; if the resolved
+        canonical name is in the roster, that token is a known alias variant.
+      Stage 2 — fuzzy: use difflib.SequenceMatcher against the roster candidate pool;
+        only accept when a token uniquely resolves to one player (ambiguous → skip).
+
+    Returns:
+        variants       — {canonical_player_name: {variant_str, ...}}
+        debug_records  — rows for name_resolution_debug.csv
+    """
+    variants: dict[str, set[str]] = {p: set() for p in players}
+    debug: list[dict] = []
+
+    # Build canonical form set for fast membership checks and possessive filtering.
+    canonical_lowers: set[str] = set()
+    for p in players:
+        canonical_lowers.add(p.lower())
+        parts = p.split()
+        if len(parts) > 1:
+            canonical_lowers.add(parts[0].lower())  # first-name shorthand
+
+    unique_tokens: set[str] = set()
+    for row in segs:
+        text = (row.get("text") or "").strip()
+        for tok in re.findall(r"[A-Za-z']+", text):
+            if len(tok) >= _FUZZY_MIN_TOKEN_LEN and tok.lower() not in canonical_lowers:
+                unique_tokens.add(tok)
+
+    for tok in sorted(unique_tokens):
+        tok_lower = tok.lower()
+
+        # Filter: skip possessives of canonical names ("Nilesy's" → "nilesy" already canonical).
+        # The existing patterns already handle possessives via (?:'s?) suffixes.
+        if tok_lower.endswith("'s") and tok_lower[:-2] in canonical_lowers:
+            continue
+
+        # Stage 1: alias lookup
+        resolved = resolve_player_name(tok, aliases)
+        if resolved != tok:
+            matched = next((p for p in players if p.lower() == resolved.lower()), None)
+            if matched:
+                variants[matched].add(tok)
+                debug.append({
+                    "raw_mention": tok,
+                    "normalized_name": matched,
+                    "confidence": 0.95,
+                    "method": "alias",
+                    "candidate_pool": len(players),
+                })
+            continue  # don't also run fuzzy if alias matched
+
+        # Stage 2: fuzzy match against each player's name and first name.
+        # Guards:
+        #   - Skip if the TOKEN itself is < 5 chars: short tokens match too many things.
+        #   - Skip each PLAYER whose normalized key is < 5 chars: short names (Ben=3,
+        #     Ravs=4, Osie=4) produce too many false positives against common words.
+        #     Add per-player aliases to player_aliases.json for short-name variants instead.
+        if len(tok_lower) < 5:
+            continue
+
+        scores: list[tuple[float, str]] = []
+        for p in players:
+            p_key = normalize_player(p.split()[0] if ' ' in p else p)
+            if len(p_key) < 5:
+                continue  # too short — fuzzy unreliable; rely on alias stage only
+            r = difflib.SequenceMatcher(None, tok_lower, normalize_player(p)).ratio()
+            parts = p.split()
+            if len(parts) > 1:
+                r = max(r, difflib.SequenceMatcher(None, tok_lower, parts[0].lower()).ratio())
+            scores.append((r, p))
+        if not scores:
+            continue
+        scores.sort(reverse=True)
+
+        best_r, best_p = scores[0]
+        if best_r < threshold:
+            continue  # no match — leave unresolved
+
+        # Ambiguity check: reject if second-best is within 0.05 and also above threshold
+        if len(scores) > 1 and scores[1][0] >= threshold * 0.92 and (best_r - scores[1][0]) < 0.05:
+            debug.append({
+                "raw_mention": tok,
+                "normalized_name": "AMBIGUOUS",
+                "confidence": round(best_r, 3),
+                "method": "fuzzy_ambiguous",
+                "candidate_pool": f"{best_p} vs {scores[1][1]}",
+            })
+            continue
+
+        variants[best_p].add(tok)
+        debug.append({
+            "raw_mention": tok,
+            "normalized_name": best_p,
+            "confidence": round(best_r, 3),
+            "method": "fuzzy",
+            "candidate_pool": len(players),
+        })
+
+    return variants, debug
+
+
+def _build_patterns(
+    player_name: str,
+    extra_variants: set[str] | None = None,
+) -> list[tuple[re.Pattern, float, str]]:
+    """Build (regex, confidence, event_hint) for one player name.
+
+    extra_variants: alias or fuzzy-discovered ASR variant strings to also match.
+    They are compiled at _VARIANT_CONF_SCALE of the canonical confidence.
+    """
+    parts: list[tuple[re.Pattern, float, str]] = []
+    # Canonical name + first-name shorthand
+    tokens = player_name.strip().split()
+    name_variants: list[tuple[str, float]] = [(re.escape(player_name), 1.0)]
+    if len(tokens) > 1:
+        name_variants.append((re.escape(tokens[0]), 1.0))
+
+    # Extra variants (aliases, fuzzy) at reduced confidence
+    if extra_variants:
+        for ev in extra_variants:
+            ev = ev.strip()
+            if ev and ev.lower() != player_name.lower():
+                name_variants.append((re.escape(ev), _VARIANT_CONF_SCALE))
+
+    for variant_esc, scale in name_variants:
         for template, conf, hint in _NAME_DIED_TEMPLATES:
-            pat = re.compile(template.format(name=variant), re.I)
-            parts.append((pat, conf, hint))
-        for template, conf in _NIGHT_DEATH_TEMPLATES:
             try:
-                pat = re.compile(template.format(name=variant), re.I)
-                parts.append((pat, conf, "night_death"))
+                pat = re.compile(template.format(name=variant_esc), re.I)
+                parts.append((pat, conf * scale, hint))
             except re.error:
                 pass
-        # Ghost vote pattern
+        for template, conf in _NIGHT_DEATH_TEMPLATES:
+            try:
+                pat = re.compile(template.format(name=variant_esc), re.I)
+                parts.append((pat, conf * scale, "night_death"))
+            except re.error:
+                pass
         try:
-            ghost_pat = re.compile(_GHOST_VOTE_TEMPLATE.format(name=variant), re.I)
-            parts.append((ghost_pat, 0.80, "uncertain_death"))
+            ghost_pat = re.compile(_GHOST_VOTE_TEMPLATE.format(name=variant_esc), re.I)
+            parts.append((ghost_pat, 0.80 * scale, "uncertain_death"))
         except re.error:
             pass
 
     return parts
 
 
-def _build_night_target_patterns(player_name: str) -> list[tuple[re.Pattern, float]]:
+def _build_night_target_patterns(
+    player_name: str,
+    extra_variants: set[str] | None = None,
+) -> list[tuple[re.Pattern, float]]:
     """Build (regex, confidence) pairs for night-target detection for one player."""
     parts: list[tuple[re.Pattern, float]] = []
     tokens = player_name.strip().split()
-    name_variants = [re.escape(player_name)]
+    name_variants: list[tuple[str, float]] = [(re.escape(player_name), 1.0)]
     if len(tokens) > 1:
-        name_variants.append(re.escape(tokens[0]))  # first name only
-    for variant in name_variants:
+        name_variants.append((re.escape(tokens[0]), 1.0))
+    if extra_variants:
+        for ev in extra_variants:
+            ev = ev.strip()
+            if ev and ev.lower() != player_name.lower():
+                name_variants.append((re.escape(ev), _VARIANT_CONF_SCALE))
+    for variant_esc, scale in name_variants:
         for template, conf in _NIGHT_TARGET_TEMPLATES:
             try:
-                pat = re.compile(template.format(name=variant), re.I)
-                parts.append((pat, conf))
+                pat = re.compile(template.format(name=variant_esc), re.I)
+                parts.append((pat, conf * scale))
             except re.error:
                 pass
     return parts
@@ -450,14 +602,40 @@ def extract(video_id: str, force: bool = False) -> bool:
     print(f"  Players ({len(players)}): {', '.join(players)}")
     print(f"  Storyteller speaker(s): {st_speakers}")
 
-    # Build per-player patterns
+    # ── Transcript name normalization ───────────────────────────────────────────
+    # Build a reverse alias map: canonical_name → [alias, alias, ...]
+    # These are known ASR/OCR variants from player_aliases.json.
+    rev_aliases: dict[str, set[str]] = defaultdict(set)
+    for alias_str, canon in aliases.items():
+        if canon in roster:
+            rev_aliases[canon].add(alias_str)
+
+    # Fuzzy-scan all segment tokens to discover additional per-video variants.
+    # This catches ASR mangles not yet in player_aliases.json (e.g. "Briney").
+    asr_variants, name_debug_records = _discover_name_variants(players, segs, aliases)
+
+    # Merge alias variants into asr_variants (they share the same pattern slots)
+    for pname in players:
+        asr_variants[pname].update(rev_aliases.get(pname, set()))
+
+    # Report discoveries
+    total_variants = sum(len(v) for v in asr_variants.values())
+    if total_variants:
+        print(f"  Name variants (alias+fuzzy): {total_variants}")
+        for p, vs in sorted(asr_variants.items()):
+            if vs:
+                print(f"    {p}: {sorted(vs)}")
+
+    # Build per-player patterns (with variant augmentation)
     player_patterns: dict[str, list[tuple[re.Pattern, float, str]]] = {
-        name: _build_patterns(name) for name in players
+        name: _build_patterns(name, extra_variants=asr_variants.get(name))
+        for name in players
     }
 
     # Build per-player night-target patterns (used only during Night phase)
     night_target_pats: dict[str, list[tuple[re.Pattern, float]]] = {
-        name: _build_night_target_patterns(name) for name in players
+        name: _build_night_target_patterns(name, extra_variants=asr_variants.get(name))
+        for name in players
     }
 
     # Name-only patterns for cross-segment lookahead (no intent clause required).
@@ -465,11 +643,11 @@ def extract(video_id: str, force: bool = False) -> bool:
     night_target_name_pats: dict[str, list[re.Pattern]] = {}
     for _pname in players:
         _toks = _pname.strip().split()
-        _variants = [re.escape(_pname)]
-        if len(_toks) > 1:
-            _variants.append(re.escape(_toks[0]))  # first name only
+        _extra = asr_variants.get(_pname, set())
+        _variant_strings = [_pname] + ([_toks[0]] if len(_toks) > 1 else []) + list(_extra)
         night_target_name_pats[_pname] = [
-            re.compile(r"\b" + v + r"\b", re.I) for v in _variants
+            re.compile(r"\b" + re.escape(v.strip()) + r"\b", re.I)
+            for v in _variant_strings if v.strip()
         ]
 
     # Collect timestamps where each player was explicitly targeted at night.
@@ -752,6 +930,21 @@ def extract(video_id: str, force: bool = False) -> bool:
             for e in final_deaths
         )
     )
+
+    # ── Name resolution debug artifact (optional) ─────────────────────────────
+    # Emitted only when at least one variant or alias was discovered.
+    # Useful for auditing what the normalization layer matched/rejected.
+    if name_debug_records:
+        debug_path = out_dir / "name_resolution_debug.csv"
+        debug_fields = ["video_id", "raw_mention", "normalized_name", "confidence", "method", "candidate_pool"]
+        for rec in name_debug_records:
+            rec["video_id"] = video_id
+            rec.setdefault("candidate_pool", len(players))
+        with debug_path.open("w", encoding="utf-8", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=debug_fields)
+            w.writeheader()
+            w.writerows(name_debug_records)
+        print(f"  Wrote {len(name_debug_records)} resolution records -> {debug_path.name}")
 
     return True
 
