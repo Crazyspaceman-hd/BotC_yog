@@ -183,7 +183,8 @@ CREATE TABLE IF NOT EXISTS death_events (
     storyteller_anchored INTEGER DEFAULT 0,
     header_visible       INTEGER DEFAULT 0,
     linked_status_change INTEGER DEFAULT 0,
-    cause_confidence     REAL
+    cause_confidence     REAL,
+    night_target_evidence INTEGER DEFAULT 0  -- 1 if demon chose this player during preceding Night
 );
 CREATE INDEX IF NOT EXISTS idx_deathe_vid ON death_events(video_id);
 
@@ -234,6 +235,7 @@ def build(db_path: Path) -> None:
         "ALTER TABLE roster ADD COLUMN initial_actual_role TEXT",
         "ALTER TABLE roster ADD COLUMN role_changed INTEGER DEFAULT 0",
         "ALTER TABLE phase_labels ADD COLUMN round INTEGER DEFAULT 0",
+        "ALTER TABLE death_events ADD COLUMN night_target_evidence INTEGER DEFAULT 0",
     ]
     for _sql in _migrations:
         try:
@@ -487,8 +489,9 @@ def build(db_path: Path) -> None:
             con.executemany(
                 "INSERT INTO death_events(video_id, timestamp_start, player_name, "
                 "event_type, source, confidence, phase, source_text, inferred_round, "
-                "storyteller_anchored, header_visible, linked_status_change, cause_confidence) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "storyteller_anchored, header_visible, linked_status_change, cause_confidence, "
+                "night_target_evidence) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 [
                     (
                         vid,
@@ -504,6 +507,7 @@ def build(db_path: Path) -> None:
                         int(r.get("header_visible", 0)),
                         int(r.get("linked_status_change", 0)),
                         float(r.get("cause_confidence", 0)),
+                        int(r.get("night_target_evidence", 0)),
                     )
                     for r in rows
                 ],

@@ -69,6 +69,10 @@ _HEADER_WINDOW_S: float = 60.0
 # Confidence boost when player header is visible during the death announcement
 _HEADER_CONF_BOOST: float = 0.05
 
+# Confidence boost when night-target dialogue corroborates a confirmed death.
+# Small — night-target alone is not proof of who was killed (protection can occur).
+_NIGHT_TARGET_CONF_BOOST: float = 0.05
+
 # Minimum confidence to emit a death event (anything below is silently dropped)
 _MIN_CONF: float = 0.45
 
@@ -127,6 +131,26 @@ _SELF_DEAD_RE = re.compile(
 
 # "X has used their ghost vote" — confirms X is already dead
 _GHOST_VOTE_TEMPLATE = r"\b{name}(?:'s|s)?\s+(?:has\s+used|used)\s+(?:their|(?:his|her)\s+)?ghost\s+vote\b"
+
+# Night-target dialogue: demon explicitly selecting a kill target during Night phase.
+# Collected separately — NEVER alone create a death event.
+# Only corroborate already-confirmed deaths (improve classification + confidence).
+# Night-phase filter is applied in the scan loop; these patterns are too
+# ambiguous to fire meaningfully during Day discussion.
+_NIGHT_TARGET_TEMPLATES: list[tuple[str, float]] = [
+    # "I'll kill [name]" / "I'm going to kill [name]" / "I'm gonna kill [name]"
+    (r"\b(?:i'?ll|i\s+will|i'?m\s+(?:going\s+to|gonna))\s+kill\s+{name}\b", 0.65),
+    # "I choose [name]" / "I pick [name]" / "I select [name]"  (direct form)
+    (r"\bi\s+(?:choose|pick|select)\s+{name}\b", 0.60),
+    # "I'll pick [name]" / "I'm gonna pick [name]" / "I'm going to choose [name]"
+    (r"\b(?:i'?ll|i\s+will|i'?m\s+(?:going\s+to|gonna))\s+(?:pick|choose|select)\s+{name}\b", 0.60),
+    # "I want to kill [name]"
+    (r"\bi\s+want\s+to\s+kill\s+{name}\b", 0.65),
+    # "[name] is my kill/target/pick"
+    (r"\b{name}\s+is\s+my\s+(?:kill|target|pick)\b", 0.65),
+    # "my kill/target/pick is [name]" / "my kill/target/pick [name]"
+    (r"\bmy\s+(?:kill|target|pick)\s+(?:is\s+)?{name}\b", 0.65),
+]
 
 
 # ── Data loading helpers ───────────────────────────────────────────────────────
@@ -295,6 +319,23 @@ def _build_patterns(player_name: str) -> list[tuple[re.Pattern, float, str]]:
     return parts
 
 
+def _build_night_target_patterns(player_name: str) -> list[tuple[re.Pattern, float]]:
+    """Build (regex, confidence) pairs for night-target detection for one player."""
+    parts: list[tuple[re.Pattern, float]] = []
+    tokens = player_name.strip().split()
+    name_variants = [re.escape(player_name)]
+    if len(tokens) > 1:
+        name_variants.append(re.escape(tokens[0]))  # first name only
+    for variant in name_variants:
+        for template, conf in _NIGHT_TARGET_TEMPLATES:
+            try:
+                pat = re.compile(template.format(name=variant), re.I)
+                parts.append((pat, conf))
+            except re.error:
+                pass
+    return parts
+
+
 # ── Main extraction ────────────────────────────────────────────────────────────
 
 
@@ -378,6 +419,14 @@ def extract(video_id: str, force: bool = False) -> bool:
         name: _build_patterns(name) for name in players
     }
 
+    # Build per-player night-target patterns (used only during Night phase)
+    night_target_pats: dict[str, list[tuple[re.Pattern, float]]] = {
+        name: _build_night_target_patterns(name) for name in players
+    }
+    # Collect timestamps where each player was explicitly targeted at night.
+    # These NEVER alone cause a death event.
+    night_targets: dict[str, list[float]] = defaultdict(list)
+
     # ── Scan transcript ────────────────────────────────────────────────────────
     # Collect raw death candidates: {player_name: [(t, conf, hint, source_text, speaker)]}
     raw_candidates: dict[str, list[tuple[float, float, str, str, str]]] = defaultdict(list)
@@ -405,6 +454,20 @@ def extract(video_id: str, force: bool = False) -> bool:
                 raw_candidates[canon].append(
                     (t, 0.60, "uncertain_death", text[:120], speaker)
                 )
+
+        # --- night-target collection (Night phase, non-ST speakers only) ---
+        # Demon choosing a kill target. Night-phase filter limits false positives
+        # from Day discussion ("I'm going to kill Duncan in the vote").
+        # A player cannot be their own target (demon cannot self-kill in BotC).
+        if _phase_at(t, phase_labels) == "Night" and speaker not in st_speakers:
+            speaker_canon = speaker_map.get(speaker)
+            for pname, pats in night_target_pats.items():
+                if speaker_canon == pname:
+                    continue  # skip self-references
+                for pat, _ in pats:
+                    if pat.search(text):
+                        night_targets[pname].append(t)
+                        break  # one match per player per segment is enough
 
     # ── Deduplicate: per player, collapse events within _DEDUP_WINDOW_S ────────
     death_events: list[dict] = []
@@ -439,8 +502,29 @@ def extract(video_id: str, force: bool = False) -> bool:
             rnd = _round_at(t, phase_labels)
             event_type = _classify_event_type(hint, t, phase, day_evts, phase_labels)
 
+            # Apply night-target corroboration:
+            # If demon-target dialogue named this player during ANY Night phase
+            # before the death announcement, use it to improve classification
+            # and add a small confidence boost.
+            #
+            # Rules:
+            #   - Does not create a death event on its own (signals collected separately)
+            #   - Upgrades uncertain_death → night_death (night-target is strong cause evidence)
+            #   - Does NOT override execution (vote context takes precedence)
+            #   - Protected/failed kills never cause false deaths because no death
+            #     announcement exists to pair with — the corroboration only fires
+            #     on already-confirmed death events.
+            has_night_target = any(nt < t for nt in night_targets.get(pname, []))
+            if has_night_target:
+                conf = min(1.0, conf + _NIGHT_TARGET_CONF_BOOST)
+                if event_type == "uncertain_death":
+                    event_type = "night_death"
+
             # header-visible flag for the record
             hv = _header_visible_near(t, frame_scan)
+
+            # storyteller_anchored: True when the death signal was spoken by a ST speaker.
+            st_anchored = int(speaker in st_speakers)
 
             death_events.append({
                 "timestamp_start": t,
@@ -451,10 +535,11 @@ def extract(video_id: str, force: bool = False) -> bool:
                 "phase": phase,
                 "source_text": src_text,
                 "inferred_round": rnd,
-                "storyteller_anchored": 0,  # future: 1 if matched ST-speaker text
+                "storyteller_anchored": st_anchored,
                 "header_visible": int(hv),
                 "linked_status_change": 1,  # always linked (death == status dead)
                 "cause_confidence": round(conf, 3),
+                "night_target_evidence": int(has_night_target),
             })
 
     # ── Sort by time ──────────────────────────────────────────────────────────
@@ -512,7 +597,7 @@ def extract(video_id: str, force: bool = False) -> bool:
         "timestamp_start", "player_name", "event_type", "source",
         "confidence", "phase", "source_text", "inferred_round",
         "storyteller_anchored", "header_visible", "linked_status_change",
-        "cause_confidence",
+        "cause_confidence", "night_target_evidence",
     ]
     with death_path.open("w", encoding="utf-8", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=death_fields)
