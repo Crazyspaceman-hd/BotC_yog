@@ -1,6 +1,6 @@
 # Dataset Snapshot
 
-> **Last updated:** 2026-03-14 (post-N2 cleanup)
+> **Last updated:** 2026-03-14 (post-winner-metadata commit)
 > Run `python validate.py` for the current end-state check.
 
 ---
@@ -10,13 +10,14 @@
 | Status | Count |
 |--------|-------|
 | analyzed (full pipeline complete) | 54 |
-| members-only (no audio available) | 6 |
+| members-only (no audio available) | 5 |
 | blind game (no reliable intro roster) | 3 |
 | skip (non-game content) | 1 |
 
 DB as of last rebuild: **54 videos, 183 roles, 299 roster rows, 895 lies, 30 542 segments**
+(`speaker_map`: 392 entries; `day_events`: 1 792 rows)
 
-Winner set: 48 / 54.  Missing winner: 6 (includes blind games and 3 confirmed gaps below).
+Winner set: 51 / 54.  Missing winner: 3 (all structural — 1 skip/tutorial, 1 members-only, 1 blind game).
 
 Roster vs spreadsheet discrepancies: **115** (down from 128 pre-batch; majority are OCR coverage gaps, not wrong roles).
 
@@ -39,17 +40,13 @@ Roster vs spreadsheet discrepancies: **115** (down from 128 pre-batch; majority 
 
 | Video | Issue | Action |
 |-------|-------|--------|
-| `0wGTes2sqmE` | 2 unlinked speakers; winner missing | Watch video; fix in `fix_rosters.py`; set winner |
-| `DbF9CPOueTI` | Winner missing | Watch video; set winner in `playlist.json` |
-| `OaAUvM4SAkg` | Winner missing | Watch video; set winner in `playlist.json` |
+| `0wGTes2sqmE` | 2 unlinked speakers | Watch video; identify speakers; fix in `fix_rosters.py`; run `build_db.py` |
 | `ggM9BH__xtU` | Blind game; winner unknown; no intro roster | Watch video; set winner in `playlist.json` |
-| `OPqWyO7h-wM` | 1 unlinked speaker | `streamlit run fix_rosters.py` |
-| `QbzFmlScLSA` | 3 unlinked speakers | `streamlit run fix_rosters.py` |
-| `DzTk6kSIg-M` | 4 unlinked speakers | `streamlit run fix_rosters.py` |
-| `IUO3Xz1kNkc` | 4 unlinked speakers | `streamlit run fix_rosters.py` |
+| `OPqWyO7h-wM` | 1 unlinked speaker (speaker_4, 25 segs — Duncan or Rythian) | Watch video; fix in `fix_rosters.py`; run `build_db.py` |
+| `QbzFmlScLSA` | 3 unlinked speakers (Yogs Staff game, non-regular cast) | Watch video; identify cast; fix in `fix_rosters.py`; run `build_db.py` |
 | `DAb9sq5ku2k` | Bonus format; only 4/14 claims verified | Low priority; manual `roster_overrides.json` |
 | `d2M-N5iABRo`, `z79AJOPoNi4` | Members-only; no audio | Download with valid membership cookies |
-| `OYTaTtjk3ac` | **Tutorial/meta video** (skip=True); not a real game — no player roster possible, speaker linking is N/A. OCR shows one intro card (Sophie=Tor from a demo). Diarization ran but outputs are not meaningful for game analysis. | No action needed; validate.py excludes skip=True from speaker-link checks. |
+| `OYTaTtjk3ac` | **Tutorial/meta video** (skip=True); not a real game — no player roster possible, speaker linking is N/A. Diarization ran but outputs are not meaningful for game analysis. | No action needed; validate.py excludes skip=True from speaker-link checks. |
 
 **Protected manual rosters** (do not re-scrape with `--force-manual`):
 - `tf_LO5NKKUU` — `source: manual_entry`; 6 players curated by hand
