@@ -1158,6 +1158,10 @@ def main(video_id: str, force: bool = False) -> None:
         labeled_intervals = _sharpen_boundaries(
             labeled_intervals, frame_scan_samples, rows, storyteller_id
         )
+        # Sharpening can create sub-MIN_PHASE_S islands (e.g. a 1-second Day
+        # between a sharpened Intro end and a sharpened Night start). Re-merge.
+        labeled_intervals = _merge_short(labeled_intervals, MIN_PHASE_S)
+        labeled_intervals = _collapse(labeled_intervals)
         print(f"  Boundary sharpening: {n_transitions} header transition(s) available")
     else:
         print("  Boundary sharpening: skipped (no frame_scan header transitions)")
