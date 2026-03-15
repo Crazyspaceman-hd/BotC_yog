@@ -42,6 +42,11 @@ from pathlib import Path
 
 from pipeline_utils import load_player_aliases, normalize_player, resolve_player_name
 
+try:
+    from botc_ui import _team as _botc_team  # type: ignore[import]
+except Exception:
+    _botc_team = None  # type: ignore[assignment]
+
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
 OUTPUTS_DIR = Path("outputs")
@@ -97,6 +102,16 @@ _FUZZY_MIN_TOKEN_LEN: int = 4
 # Confidence scale factor applied to pattern matches via alias/fuzzy variants.
 # Small penalty acknowledges minor additional uncertainty vs. exact canonical spelling.
 _VARIANT_CONF_SCALE: float = 0.95
+
+# Time window (seconds) used when reconciling a night-target event to an actual
+# death.  Deaths that occur within this window after a targeting event are
+# treated as candidates for the same "night."  Generous (2 hours) to handle
+# games where ST visit dialogue precedes the Day announcement by a long gap.
+_NIGHT_TARGET_LINK_WINDOW_S: float = 7200.0
+
+# Dedup window for night_target_events: two targeting records for the same
+# speaker+target within this window are collapsed to the higher-confidence one.
+_NT_DEDUP_WINDOW_S: float = 60.0
 
 # Window for suppressing self-declaration false positives caused by the British-
 # English idiom "I'm dead" as a shocked reaction to another player's death.
@@ -321,6 +336,23 @@ def _has_vote_sequence_before(t: float, day_evts: list[dict]) -> bool:
             if end <= t and (t - end) <= _VOTE_LOOKBACK_S:
                 return True
     return False
+
+
+def _actor_alignment(speaker: str, speaker_map: dict, roster: dict) -> str:
+    """Return Evil/Good/unknown alignment for the speaker using the per-video roster."""
+    if _botc_team is None:
+        return "unknown"
+    canon = speaker_map.get(speaker, "")
+    if not canon:
+        return "unknown"
+    role = roster.get(canon, "")
+    if not role:
+        return "unknown"
+    try:
+        result = _botc_team(role)
+        return result if result else "unknown"
+    except Exception:
+        return "unknown"
 
 
 def _header_visible_near(t: float, frame_scan: list[tuple[float, int]]) -> bool:
@@ -654,6 +686,10 @@ def extract(video_id: str, force: bool = False) -> bool:
     # These NEVER alone cause a death event.
     night_targets: dict[str, list[float]] = defaultdict(list)
 
+    # Full metadata records for night-target events → written to night_target_events.csv.
+    # Separate concept from confirmed deaths — intended target ≠ actual victim.
+    night_target_records: list[dict] = []
+
     # ── Scan transcript ────────────────────────────────────────────────────────
     # Collect raw death candidates: {player_name: [(t, conf, hint, source_text, speaker)]}
     raw_candidates: dict[str, list[tuple[float, float, str, str, str]]] = defaultdict(list)
@@ -691,9 +727,26 @@ def extract(video_id: str, force: bool = False) -> bool:
             for pname, pats in night_target_pats.items():
                 if speaker_canon == pname:
                     continue  # skip self-references
-                for pat, _ in pats:
+                for pat, conf in pats:
                     if pat.search(text):
                         night_targets[pname].append(t)
+                        night_target_records.append({
+                            "timestamp_start": t,
+                            "source_speaker": speaker,
+                            "target_player": pname,
+                            "target_role_if_any": roster.get(pname, ""),
+                            "source_text": text[:120],
+                            "confidence": round(conf, 3),
+                            "evidence_type": "named_intent",
+                            "actor_hint": speaker_canon or "",
+                            "candidate_actor_alignment": _actor_alignment(
+                                speaker, speaker_map, roster
+                            ),
+                            # filled after final_deaths computed:
+                            "linked_death_player": "",
+                            "linked_death_timestamp": "",
+                            "outcome_relation": "unknown",
+                        })
                         break  # one match per player per segment is enough
 
     # ── Cross-segment kill-intent lookahead (Night phase) ──────────────────────
@@ -753,6 +806,24 @@ def extract(video_id: str, force: bool = False) -> bool:
                         break
             if matched_player:
                 night_targets[matched_player].append(t)
+                # Combine intent + target segments for source_text clarity
+                combined_src = f"{text[:60].strip()} | {next_text[:60].strip()}"
+                night_target_records.append({
+                    "timestamp_start": t,
+                    "source_speaker": speaker,
+                    "target_player": matched_player,
+                    "target_role_if_any": roster.get(matched_player, ""),
+                    "source_text": combined_src[:120],
+                    "confidence": 0.70,  # split across segments → lower certainty
+                    "evidence_type": "split_intent",
+                    "actor_hint": speaker_map.get(speaker, "") or "",
+                    "candidate_actor_alignment": _actor_alignment(
+                        speaker, speaker_map, roster
+                    ),
+                    "linked_death_player": "",
+                    "linked_death_timestamp": "",
+                    "outcome_relation": "unknown",
+                })
                 print(
                     f"    [lookahead] kill-intent at {t:.1f}s"
                     f" -> target '{matched_player}' found at {next_t:.1f}s"
@@ -930,6 +1001,93 @@ def extract(video_id: str, force: bool = False) -> bool:
             for e in final_deaths
         )
     )
+
+    # ── Night-target events: dedup + reconcile + write ────────────────────────
+    # Dedup: for the same (source_speaker, target_player), collapse records that
+    # are within _NT_DEDUP_WINDOW_S of each other — keep highest confidence.
+    nte_deduped: list[dict] = []
+    for rec in sorted(night_target_records, key=lambda r: r["timestamp_start"]):
+        matched_existing = None
+        for existing in nte_deduped:
+            if (
+                existing["source_speaker"] == rec["source_speaker"]
+                and existing["target_player"] == rec["target_player"]
+                and abs(existing["timestamp_start"] - rec["timestamp_start"]) <= _NT_DEDUP_WINDOW_S
+            ):
+                matched_existing = existing
+                break
+        if matched_existing is None:
+            nte_deduped.append(rec)
+        elif rec["confidence"] > matched_existing["confidence"]:
+            # Replace lower-confidence duplicate with higher-confidence version
+            nte_deduped[nte_deduped.index(matched_existing)] = rec
+
+    # Reconcile each targeting record against confirmed deaths.
+    # Outcome categories (per task spec):
+    #   matched_actual_death      — target player confirmed dead after this event
+    #   did_not_match_actual_death — target survived; someone else died that night
+    #   no_confirmed_death         — no death detected in the look-ahead window
+    #   unknown                    — cannot determine (e.g. death before targeting)
+    death_lookup: dict[str, float] = {
+        d["player_name"]: d["timestamp_start"] for d in final_deaths
+    }
+    for rec in nte_deduped:
+        t_evt = rec["timestamp_start"]
+        target = rec["target_player"]
+        target_death_t = death_lookup.get(target)
+
+        if target_death_t is not None and target_death_t > t_evt:
+            # Target player died after the targeting event — direct match
+            rec["outcome_relation"] = "matched_actual_death"
+            rec["linked_death_player"] = target
+            rec["linked_death_timestamp"] = round(target_death_t, 2)
+        elif target_death_t is not None and target_death_t <= t_evt:
+            # Target died BEFORE the targeting event — unusual; flag as unknown
+            rec["outcome_relation"] = "unknown"
+            rec["linked_death_player"] = target
+            rec["linked_death_timestamp"] = round(target_death_t, 2)
+        else:
+            # Target has no confirmed death after this event.
+            # Check whether someone else died in the look-ahead window
+            # (suggests protection, redirect, or bounce effect).
+            other_deaths_after = [
+                d for d in final_deaths
+                if d["player_name"] != target
+                and d["timestamp_start"] > t_evt
+                and d["timestamp_start"] <= t_evt + _NIGHT_TARGET_LINK_WINDOW_S
+            ]
+            if other_deaths_after:
+                # Pick the earliest death in the window as the likely actual victim
+                actual = min(other_deaths_after, key=lambda d: d["timestamp_start"])
+                rec["outcome_relation"] = "did_not_match_actual_death"
+                rec["linked_death_player"] = actual["player_name"]
+                rec["linked_death_timestamp"] = round(actual["timestamp_start"], 2)
+            else:
+                rec["outcome_relation"] = "no_confirmed_death"
+                rec["linked_death_player"] = ""
+                rec["linked_death_timestamp"] = ""
+
+    # Write night_target_events.csv (always — even if empty, so downstream can
+    # reliably detect N4 coverage vs. a missing file).
+    nte_path = out_dir / "night_target_events.csv"
+    nte_fields = [
+        "timestamp_start", "source_speaker", "target_player", "target_role_if_any",
+        "source_text", "confidence", "evidence_type",
+        "candidate_actor_alignment", "actor_hint",
+        "linked_death_player", "linked_death_timestamp", "outcome_relation",
+    ]
+    with nte_path.open("w", encoding="utf-8", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=nte_fields)
+        w.writeheader()
+        w.writerows(nte_deduped)
+    print(f"  Wrote {len(nte_deduped)} night-target events -> {nte_path.name}")
+    if nte_deduped:
+        for rec in nte_deduped:
+            print(
+                f"    {rec['evidence_type']:14} t={rec['timestamp_start']:.0f}s"
+                f"  actor={rec['actor_hint'] or rec['source_speaker']}"
+                f"  -> {rec['target_player']}  [{rec['outcome_relation']}]"
+            )
 
     # ── Name resolution debug artifact (optional) ─────────────────────────────
     # Emitted only when at least one variant or alias was discovered.

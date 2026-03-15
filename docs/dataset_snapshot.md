@@ -1,6 +1,6 @@
 # Dataset Snapshot
 
-> **Last updated:** 2026-03-15 (feat/player-status-tracking: N4 transcript name normalization)
+> **Last updated:** 2026-03-15 (feat/player-status-tracking: N4 night target events)
 > Run `python validate.py` for the current end-state check.
 
 ---
@@ -15,7 +15,7 @@
 | skip (non-game content) | 1 |
 
 DB as of last rebuild: **54 videos, 183 roles, 299 roster rows, 895 lies, 30 542 segments**
-(`speaker_map`: 392 entries; `day_events`: 1 792 rows)
+(`speaker_map`: 396 entries; `day_events`: 1 792 rows; `death_events`: 186 rows; `night_target_events`: 29 rows)
 
 Winner set: 51 / 54.  Missing winner: 3 (all structural — 1 skip/tutorial, 1 members-only, 1 blind game).
 
@@ -31,7 +31,7 @@ Roster vs spreadsheet discrepancies: **115** (down from 128 pre-batch; majority 
 | N1 speaker_consistency | 52 / 53 | 1 missing |
 | N2 phase_detection | 53 / 53 | all covered |
 | N3 claim_extraction | 53 / 53 | 3 431 total claims |
-| N4 player_status | 50 / 53 | transcript name normalization added 2026-03-15; 3 missing = blind/members/empty roster |
+| N4 player_status | 50 / 53 | night target events + transcript name normalization added 2026-03-15; 3 missing = blind/members/empty roster |
 
 *(53 = total processable; 1 video is skip-flagged)*
 

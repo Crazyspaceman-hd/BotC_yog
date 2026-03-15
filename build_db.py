@@ -188,6 +188,30 @@ CREATE TABLE IF NOT EXISTS death_events (
 );
 CREATE INDEX IF NOT EXISTS idx_deathe_vid ON death_events(video_id);
 
+-- N4: intended night-kill targeting events (from extract_player_status.py)
+-- Records intended kill targets separately from confirmed deaths.
+-- Intended target ≠ actual victim when protection, redirect, or bounce occurs.
+CREATE TABLE IF NOT EXISTS night_target_events (
+    rowid                    INTEGER PRIMARY KEY,
+    video_id                 TEXT NOT NULL REFERENCES videos(id),
+    timestamp_start          REAL,
+    source_speaker           TEXT,       -- diarization speaker_id
+    target_player            TEXT,       -- intended target (canonical player name)
+    target_role_if_any       TEXT,       -- role of target from roster (may be empty)
+    source_text              TEXT,       -- transcript evidence
+    confidence               REAL,
+    evidence_type            TEXT,       -- 'named_intent' | 'split_intent'
+    candidate_actor_alignment TEXT,      -- 'Evil' | 'Good' | 'unknown' (best-effort)
+    actor_hint               TEXT,       -- canonical player name of the actor
+    linked_death_player      TEXT,       -- actual victim (may differ from target)
+    linked_death_timestamp   REAL,       -- timestamp of actual victim's death
+    outcome_relation         TEXT        -- 'matched_actual_death' | 'did_not_match_actual_death'
+                                         --   | 'no_confirmed_death' | 'unknown'
+);
+CREATE INDEX IF NOT EXISTS idx_nte_vid    ON night_target_events(video_id);
+CREATE INDEX IF NOT EXISTS idx_nte_target ON night_target_events(target_player);
+CREATE INDEX IF NOT EXISTS idx_nte_actor  ON night_target_events(actor_hint);
+
 -- N3: role claims, accusations, suspicions (from extract_claims.py)
 CREATE TABLE IF NOT EXISTS claims (
     rowid           INTEGER PRIMARY KEY,
@@ -514,6 +538,41 @@ def build(db_path: Path) -> None:
             )
             deathe_total += len(rows)
 
+    # ── night_target_events (N4 — from extract_player_status.py) ────────────
+    nte_total = 0
+    for e in entries:
+        vid = e["id"]
+        nte_csv = Path("outputs") / vid / "night_target_events.csv"
+        if nte_csv.exists():
+            con.execute("DELETE FROM night_target_events WHERE video_id = ?", (vid,))
+            rows = read_csv(nte_csv)
+            con.executemany(
+                "INSERT INTO night_target_events(video_id, timestamp_start, source_speaker, "
+                "target_player, target_role_if_any, source_text, confidence, evidence_type, "
+                "candidate_actor_alignment, actor_hint, linked_death_player, "
+                "linked_death_timestamp, outcome_relation) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                [
+                    (
+                        vid,
+                        float(r.get("timestamp_start", 0)),
+                        r.get("source_speaker", ""),
+                        r.get("target_player", ""),
+                        r.get("target_role_if_any", ""),
+                        r.get("source_text", ""),
+                        float(r.get("confidence", 0)),
+                        r.get("evidence_type", ""),
+                        r.get("candidate_actor_alignment", ""),
+                        r.get("actor_hint", ""),
+                        r.get("linked_death_player", ""),
+                        float(r.get("linked_death_timestamp", 0) or 0),
+                        r.get("outcome_relation", ""),
+                    )
+                    for r in rows
+                ],
+            )
+            nte_total += len(rows)
+
     # ── frame_scan (N0 — from scan_frames.py) ────────────────────────────────
     fscan_total = 0
     for e in entries:
@@ -577,7 +636,8 @@ def build(db_path: Path) -> None:
         f"roster_players={roster_total:,}   speaker_map={spkmap_total:,}\n"
         f"  phase_labels={phase_total:,}   day_events={devents_total:,}   "
         f"claims={claims_total:,}   frame_scan={fscan_total:,}   role_changes={rchg_total:,}\n"
-        f"  player_status={pstatus_total:,}   death_events={deathe_total:,}"
+        f"  player_status={pstatus_total:,}   death_events={deathe_total:,}   "
+        f"night_target_events={nte_total:,}"
     )
     print(f"  Built at: {datetime.now().isoformat(timespec='seconds')}")
 
