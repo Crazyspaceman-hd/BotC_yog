@@ -56,8 +56,11 @@ ALIASES_PATH = Path("player_aliases.json")
 _VOTE_LOOKBACK_S: float = 120.0
 
 # Day-start window: if death is announced within this many seconds of a Day
-# phase start, treat it as a night-death morning announcement
-_DAY_START_WINDOW_S: float = 600.0
+# phase start, treat it as a night-death morning announcement.
+# 1200s (20 min) is generous to absorb videos where the phase detector
+# mislabels Night 1 as part of Day 1 — the morning announcement of night kills
+# happens at the real Day 1 start which may be well into the "Day" label.
+_DAY_START_WINDOW_S: float = 1200.0
 
 # Maximum time between two death signals for the same player before treating
 # them as duplicate firings of the same event
@@ -367,11 +370,22 @@ def _classify_event_type(
         return "execution"
     if candidate_hint == "night_death":
         return "night_death"
-    # uncertain_death: refine by context
-    if has_vote and phase == "Day":
-        return "execution"
+    if candidate_hint == "self_declaration":
+        # Ghost saying "I'm dead": confirms death but not cause. The nearby
+        # VoteSequence may be for a different player, so do NOT upgrade to
+        # execution. Use day-start proximity for night_death, else uncertain.
+        if is_day_start and phase == "Day":
+            return "night_death"
+        return "uncertain_death"
+    # uncertain_death: refine by context.
+    # Day-start takes priority over VoteSequence: a vote may have occurred for a
+    # *different* player, and the morning announcement of a night kill should not
+    # be misclassified as an execution. Explicit execution patterns (goodbye,
+    # last words, "was executed") bypass this path via hint="execution" above.
     if is_day_start and phase == "Day":
         return "night_death"
+    if has_vote and phase == "Day":
+        return "execution"
     return "uncertain_death"
 
 
@@ -477,7 +491,7 @@ def extract(video_id: str, force: bool = False) -> bool:
             canon = speaker_map.get(speaker)
             if canon and canon in roster:
                 raw_candidates[canon].append(
-                    (t, 0.60, "uncertain_death", text[:120], speaker)
+                    (t, 0.60, "self_declaration", text[:120], speaker)
                 )
 
         # --- night-target collection (Night phase, non-ST speakers only) ---
