@@ -1,6 +1,6 @@
 # Dataset Snapshot
 
-> **Last updated:** 2026-03-14
+> **Last updated:** 2026-03-14 (post-N2 cleanup)
 > Run `python validate.py` for the current end-state check.
 
 ---
@@ -48,11 +48,36 @@ Roster vs spreadsheet discrepancies: **115** (down from 128 pre-batch; majority 
 | `DzTk6kSIg-M` | 4 unlinked speakers | `streamlit run fix_rosters.py` |
 | `IUO3Xz1kNkc` | 4 unlinked speakers | `streamlit run fix_rosters.py` |
 | `DAb9sq5ku2k` | Bonus format; only 4/14 claims verified | Low priority; manual `roster_overrides.json` |
-| `d2M-N5iABRo`, `OYTaTtjk3ac`, `z79AJOPoNi4` | Members-only; no audio | Download with valid membership cookies |
+| `d2M-N5iABRo`, `z79AJOPoNi4` | Members-only; no audio | Download with valid membership cookies |
+| `OYTaTtjk3ac` | **Tutorial/meta video** (skip=True); not a real game — no player roster possible, speaker linking is N/A. OCR shows one intro card (Sophie=Tor from a demo). Diarization ran but outputs are not meaningful for game analysis. | No action needed; validate.py excludes skip=True from speaker-link checks. |
 
 **Protected manual rosters** (do not re-scrape with `--force-manual`):
 - `tf_LO5NKKUU` — `source: manual_entry`; 6 players curated by hand
 - `HQlYPDUfM4Q` — `source: manual_entry`; 6 players curated by hand
+
+---
+
+## Speaker-linking notes
+
+### fix_rosters.py workflow
+`fix_rosters.py` writes directly to `outputs/<id>/roster_overrides.json` on save.
+The Streamlit UI reflects saved data immediately on reload.
+However, **`validate.py` reads the DB** — so `build_db.py` must be run after saving in
+`fix_rosters.py` before validation will reflect the change.
+Correct sequence: `streamlit run fix_rosters.py` → save → `python build_db.py` → `python validate.py`.
+
+### Unlinked speaker classification
+Investigated unlinked speakers in `QbzFmlScLSA`, `nPAdvl7pySg`, `OPqWyO7h-wM` (2026-03-14):
+
+- **Not overlap-clusters**: All unlinked speakers in `QbzFmlScLSA` (spk 3/4/5) and `nPAdvl7pySg`
+  span the full video duration. They are real individual players, not diarization artefacts.
+  Identification requires watching the video.
+- **`QbzFmlScLSA`**: "Yogs Staff" game with non-regular cast. `speaker_3` mentions Craig and Sarah;
+  `speaker_4` is addressed as Alex; speaker identities otherwise unknown without watching.
+  Currently only Matt (spk_1) and CRAIG (spk_2) are linked; 3 speakers and full roster remain open.
+- **`OPqWyO7h-wM`**: `speaker_4` has only 25 segments (via consistent.csv); remaining unlinked
+  player is Duncan or Rythian. Requires video watch to confirm.
+- **`nPAdvl7pySg`**: Blind game — speaker linking is expected to be incomplete.
 
 ---
 

@@ -41,6 +41,7 @@ python validate.py --json                                  # machine-readable ou
 python scan_frames.py <video_id>                           # N0: visual phase signal extraction
 python speaker_consistency.py <video_id>                   # N1: smooth diarization
 python detect_phases.py <video_id>                         # N2: phase boundary detection
+python detect_phases.py --force -- <video_id>              # N2: re-run (use -- for dash-prefix IDs e.g. -Ejl5ODVNg0)
 python extract_claims.py <video_id>                        # N3: claim/event extraction
 ```
 

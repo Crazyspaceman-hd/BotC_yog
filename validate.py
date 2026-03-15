@@ -252,11 +252,14 @@ def check_unlinked_speakers(rpt: Report) -> None:
     """
     if not DB_PATH.exists():
         return
-    # Build set of blind video IDs so we can classify differently
+    entries = load_playlist_entries()
+    # skip=True: not a real game episode — speaker linking is N/A; exclude entirely
+    skip_vids: set[str] = {e["id"] for e in entries if e.get("skip")}
+    # blind/members: expected to have no speaker links (downgrade to INFO, not WARN)
     blind_vids: set[str] = {
-        e["id"] for e in load_playlist_entries()
+        e["id"] for e in entries
         if e.get("blind") or e.get("members_only")
-    }
+    } - skip_vids
     try:
         con = sqlite3.connect(str(DB_PATH))
         # Speakers in segments that have NO entry in speaker_map
@@ -273,6 +276,8 @@ def check_unlinked_speakers(rpt: Report) -> None:
         """).fetchall()
         warn_count = 0
         for vid, spk, n in unlinked:
+            if vid in skip_vids:
+                continue  # not a game episode; speaker linking is N/A
             if vid in blind_vids:
                 rpt.add(INFO, "curation:unlinked_speakers",
                         f"{spk} unlinked ({n} segs) - blind/members game, expected",
