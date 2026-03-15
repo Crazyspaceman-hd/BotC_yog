@@ -480,21 +480,49 @@ def check_enrichment_artifacts(rpt: Report,
             n1_present += 1
 
         # N2: phase_labels.csv — check header, phase values, and round column
+        # Valid broad phases: Intro, Night, Day (Nomination/Execution are now
+        # day-scoped events written to day_events.csv, not top-level phases).
+        # "Unknown" and legacy "Nomination"/"Execution" are accepted with a
+        # warning so that existing files do not fail validation hard.
         p_phase = out / "phase_labels.csv"
         if p_phase.exists():
             try:
                 rows = list(_csv.DictReader(p_phase.open(encoding="utf-8")))
-                valid_phases = {"Intro", "Night", "Day", "Nomination", "Execution", "Unknown"}
-                bad = [r["phase"] for r in rows if r.get("phase") not in valid_phases]
+                valid_phases   = {"Intro", "Night", "Day", "Unknown"}
+                legacy_phases  = {"Nomination", "Execution"}
+                bad    = [r["phase"] for r in rows
+                          if r.get("phase") not in valid_phases | legacy_phases]
+                legacy = [r["phase"] for r in rows
+                          if r.get("phase") in legacy_phases]
                 has_round = rows and "round" in rows[0]
                 if bad:
                     issues.append(f"{vid}: phase_labels.csv has unrecognised phases: {bad[:3]}")
+                elif legacy:
+                    issues.append(
+                        f"{vid}: phase_labels.csv contains legacy phases "
+                        f"{set(legacy)} — re-run detect_phases.py to upgrade"
+                    )
                 elif not has_round:
                     issues.append(f"{vid}: phase_labels.csv missing 'round' column — re-run phases step")
                 else:
                     n2_valid += 1
             except Exception as exc:
                 issues.append(f"{vid}: phase_labels.csv unreadable — {exc}")
+
+        # N2b: day_events.csv — presence check only (content not strictly required)
+        p_events = out / "day_events.csv"
+        if p_events.exists():
+            try:
+                erows = list(_csv.DictReader(p_events.open(encoding="utf-8")))
+                valid_events = {
+                    "NominationStart", "VoteSequence", "ExecutionAnnouncement",
+                    "StorytellerInterruption", "DayEnd",
+                }
+                bad_ev = [r["event"] for r in erows if r.get("event") not in valid_events]
+                if bad_ev:
+                    issues.append(f"{vid}: day_events.csv has unrecognised event types: {bad_ev[:3]}")
+            except Exception as exc:
+                issues.append(f"{vid}: day_events.csv unreadable — {exc}")
 
         # N3: claims.csv (claim_graph.json is optional / not required by build_db)
         p_claims = out / "claims.csv"

@@ -74,7 +74,7 @@ B+C ──► D. video.merge
          v
          E. video.patch      (optional but recommended)
          |
-         └─► [N2. speaker.day_boundary_detection] ← optional, writes phase_labels.csv
+         └─► [N2. speaker.day_boundary_detection] ← optional, writes phase_labels.csv + day_events.csv
 
 A ──► F. video.scrape       (independent of B/C/D — reads video.mp4 directly)
       |
@@ -122,33 +122,42 @@ E/F+overrides ──► G. video.analyze
 The pipeline distinguishes between **phases** (broad temporal regions of a game) and
 **events** (discrete occurrences within those regions).
 
-**Major phases** — produced by N2 (phase_detection / `detect_phases.py`):
+**Broad phases** — produced by N2 (phase_detection / `detect_phases.py`), written to `phase_labels.csv`:
 
 | Phase | Description |
 |-------|-------------|
 | `Intro` | Pre-game: players announce roles; Storyteller assigns night abilities |
 | `Night` | Players close eyes; Storyteller resolves night actions privately |
-| `Day` | Open discussion; players talk, share information, accuse |
-| `Nomination` | A player is nominated; the group votes on whether to execute |
-| `Execution` | Storyteller announces the execution outcome |
+| `Day` | All open discussion: group talk, nominations, voting, execution announcements |
 
-> **Design note:** `Town` is not a phase label in the code.  The open-discussion
-> period is labelled `Day`.  `Nomination` and `Execution` are sub-phases of what
-> a player would informally call "Town meeting."
+> **Design note:** `Nomination` and `Execution` are no longer top-level phases.
+> Everything visible to all players (group discussion, votes, ST announcements)
+> is labelled `Day`.  Fine-grained game events within Day are captured in
+> `day_events.csv` (see below).
 
-**Events inside phases** — produced by N3 (claim_extraction / `extract_claims.py`):
+**Day-scoped events** — also produced by N2, written to `day_events.csv`:
+
+| Event | Description | Primary evidence |
+|-------|-------------|-----------------|
+| `NominationStart` | Nominations open or a nomination is made | `frame_scan.votes_visible` (conf 1.0) or ST keyword (conf 0.9) or player keyword (conf 0.6) |
+| `VoteSequence` | The full voting window for a nomination | `frame_scan.votes_visible` window start→end |
+| `ExecutionAnnouncement` | ST announces execution outcome (death or pardon) | Keyword regex in ST speech |
+| `StorytellerInterruption` | ST speaks 1:1 with a player mid-Day (structural signal) | 2-speaker window during Day phase |
+| `DayEnd` | Day→Night boundary (derived from phase transition) | Phase label boundary |
+
+**Claim events** — produced by N3 (claim_extraction / `extract_claims.py`):
 
 | Event | Typical phase | Description |
 |-------|--------------|-------------|
-| `nomination` | Nomination | A player nominates another for execution |
-| `vote` | Nomination | A player casts a yes/no vote |
-| `execution` | Execution | ST announces result; player dies or survives |
-| `death` | Night / Execution | A player is removed from the game |
 | `role_claim` | Day / Night | A player claims (or implies) a role |
-| `accusation` | Day / Nomination | A player accuses another of being Evil |
+| `accusation` | Day | A player accuses another of being Evil |
+| `suspicion` | Day | A player expresses suspicion about another |
+| `agreement` | Day | A player supports another's claim or accusation |
+| `challenge` | Day | A player disputes a claim |
 
 Phase labels from N2 are consumed by N3 to provide temporal context for event
-extraction (e.g. a role claim in Day has different weight than one at Night).
+extraction (e.g. a role claim during a Night phase has different weight than
+one during Day).
 
 ---
 
@@ -471,15 +480,15 @@ bash scripts/run_all.sh
 
 | Field | Value |
 |-------|-------|
-| **Purpose** | Label each segment with its game phase (Intro / Night / Day / Nomination / Execution) using keyword heuristics and speaker patterns |
+| **Purpose** | Label each segment with its broad game phase (Intro / Night / Day) and detect day-scoped events (nominations, votes, executions) |
 | **Script** | `detect_phases.py` |
 | **Per-video?** | Yes |
 | **Slot** | After E (patch) — reads `segments_patched.csv` |
-| **Inputs** | `segments_patched.csv` (fallback: `segments_consistent.csv`, `segments.csv`) |
-| **Outputs** | `outputs/<id>/phase_labels.csv` (columns: start, end, phase, confidence, evidence) |
+| **Inputs** | `segments_patched.csv` (fallback: `segments_consistent.csv`, `segments.csv`); `frame_scan` rows from `botc.db` (optional, for high-confidence event anchors) |
+| **Outputs** | `outputs/<id>/phase_labels.csv` (columns: start, end, phase, round, confidence, evidence); `outputs/<id>/day_events.csv` (columns: start, end, round, event, confidence, evidence) |
 | **Command** | `python detect_phases.py <video_id>` |
-| **Acceptance** | `phase_labels.csv` exists, rows cover full episode duration, phase column is one of the known values |
-| **Notes** | Purely text-based; no audio features. Storyteller speaker auto-detected by dominant intro presence. Low-confidence regions labelled `Unknown` then forward-filled. `--force` flag to overwrite. |
+| **Acceptance** | `phase_labels.csv` exists, rows cover full episode duration, `phase` column is one of `{Intro, Night, Day, Unknown}`; `day_events.csv` exists (may be empty if no nominations detected) |
+| **Notes** | Purely text-based + speaker-count structural signals; no raw audio features. Storyteller auto-detected by word-count dominance in first 330 s. Low-confidence regions labelled `Unknown` then forward-filled. Structural triggers: ST+1-player 2-speaker window → Night evidence; ≥2 non-ST speakers → Day evidence. `--force` flag to overwrite. Legacy `phase_labels.csv` files containing `Nomination`/`Execution` produce a WARN in `validate.py` — re-run N2 to upgrade. |
 
 ---
 
