@@ -17,6 +17,7 @@ for the full system architecture.
 | `build_db.py` | Rebuilds `botc.db` from outputs — run after any data change |
 | `validate.py` | End-state validator — run after any pipeline phase |
 | `scan_frames.py` | N0 enrichment: visual game-phase signal extraction from video frames |
+| `extract_player_status.py` | N4 enrichment: player death detection → `player_status.csv` + `death_events.csv` |
 | `compare_rosters.py` | Diffs DB roster against the episode spreadsheet — track data gaps |
 
 ## Never do without being asked

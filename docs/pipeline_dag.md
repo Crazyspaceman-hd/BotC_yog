@@ -1,7 +1,7 @@
 # BotC_yog — Pipeline DAG
 
-> **Last updated:** 2026-03-14
-> **State:** covers all scripts present on `develop` as of 2026-03-14; N0–N3 are optional enrichment nodes; player-name normalization via `normalize_player()` added to `pipeline_utils.py`
+> **Last updated:** 2026-03-15
+> **State:** covers all scripts present on `feat/player-status-tracking` as of 2026-03-15; N0–N4 are optional enrichment nodes; player-name normalization via `normalize_player()` added to `pipeline_utils.py`
 
 ---
 
@@ -88,6 +88,8 @@ E/F+overrides ──► G. video.analyze
                    |
                    ├─► [N3. content.claim_propagation] ← optional, writes claims.csv + claim_graph.json
                    |
+                   ├─► [N4. content.player_status_tracking] ← optional, writes player_status.csv + death_events.csv
+                   |
                    v
                    J. data.build_db       (cross-video, reads all G outputs)
                    |
@@ -100,7 +102,7 @@ E/F+overrides ──► G. video.analyze
                    (any phase) ──► M. validate.end_state
 ```
 
-**N0/N1/N2/N3 are optional enrichment nodes.** They do not affect playlist.json status, do not block any existing step, and are not required by J (build_db). N0 writes directly to `botc.db` (frame_scan table); N1–N3 write new artifact files alongside existing outputs.
+**N0/N1/N2/N3/N4 are optional enrichment nodes.** They do not affect playlist.json status, do not block any existing step, and are not required by J (build_db). N0 writes directly to `botc.db` (frame_scan table); N1–N4 write new artifact files alongside existing outputs.
 
 **Notes:**
 - `F. video.scrape` can run after `A. video.download` (only needs `video.mp4`).
@@ -158,6 +160,23 @@ The pipeline distinguishes between **phases** (broad temporal regions of a game)
 Phase labels from N2 are consumed by N3 to provide temporal context for event
 extraction (e.g. a role claim during a Night phase has different weight than
 one during Day).
+
+**Death events** — produced by N4 (player_status_tracking / `extract_player_status.py`):
+
+| Status / Event | Description |
+|---------------|-------------|
+| `alive` | Player is alive (initial state from intro_roster; also transitions back from unknown) |
+| `dead` | Player has died (from execution, night kill, or uncertain cause) |
+| `unknown` | Status cannot be determined from available signals |
+| `execution` | Death by nomination vote (associated with a preceding VoteSequence day event) |
+| `night_death` | Death by night action (demon kill, poisoner, etc.) |
+| `uncertain_death` | Death confirmed but cause not classifiable from signals |
+
+N4 consumes phase_labels (N2) and day_events (N2b) for temporal context and cause
+classification. Visual corroboration from frame_scan (N0) provides a confidence boost
+when the header bar is visible at the time of the death signal.
+Conservative policy: false negatives preferred over false positives — only
+emit a death event when confidence ≥ 0.45.
 
 ---
 
@@ -439,6 +458,8 @@ bash scripts/run_all.sh
 | Intro roster (OCR) | `outputs/<id>/intro_roster.json` | No (gitignored) | Via step F (may need manual fix) |
 | Speaker overrides | `outputs/<id>/roster_overrides.json` | No (gitignored) | Via steps H+I |
 | Lie analysis | `outputs/<id>/lie_analysis.csv` | No (gitignored) | Via step G |
+| Player status (N4) | `outputs/<id>/player_status.csv` | No (gitignored) | Via N4 (`extract_player_status.py`) |
+| Death events (N4) | `outputs/<id>/death_events.csv` | No (gitignored) | Via N4 (`extract_player_status.py`) |
 | Landing page HTML | `landing.html` | No (gitignored) | Via step L |
 | Live landing page | `gh-pages:index.html` | Yes (separate branch) | Via `deploy_pages.sh` |
 
@@ -508,6 +529,22 @@ bash scripts/run_all.sh
 
 ---
 
+## N4. content.player_status_tracking  [optional enrichment]
+
+| Field | Value |
+|-------|-------|
+| **Purpose** | Detect player deaths from transcript + visual signals; emit per-player status transitions and classified death events |
+| **Script** | `extract_player_status.py` |
+| **Per-video?** | Yes |
+| **Slot** | After G (analyze) — reads roster data, segments, and optional N2 phase labels + N0 frame scan |
+| **Inputs** | `segments_patched.csv` (fallback: `segments.csv`), `intro_roster.json`, `roster_overrides.json` (optional), `phase_labels.csv` (N2, optional), `day_events.csv` (N2b, optional), `frame_scan.json` (N0, optional) |
+| **Outputs** | `outputs/<id>/player_status.csv` (per-player status transitions), `outputs/<id>/death_events.csv` (one row per death) |
+| **Command** | `python extract_player_status.py <video_id>` \| `python extract_player_status.py --all` |
+| **Acceptance** | Both CSVs exist; `death_events.csv` `event_type` column contains only `{execution, night_death, uncertain_death}`; no rows with confidence below threshold |
+| **Notes** | Signal priority: visual (frame_scan `header_visible`) > ST transcript > general transcript. Storyteller detected as highest word-count speaker in first 330 s (mirrors N2). ST excluded from self-declaration path. Conservative: `_MIN_CONF=0.45`; prefers false negatives. Death cause classification uses N2 VoteSequence lookback (120 s) and Day-phase start window (600 s). `--force` flag to overwrite existing output. |
+
+---
+
 ## Scripts Not in the DAG (Support / Utility)
 
 | Script | Role |
@@ -523,6 +560,7 @@ bash scripts/run_all.sh
 | `speaker_consistency.py` | N1 optional enrichment: smooths diarization fragmentation |
 | `detect_phases.py` | N2 optional enrichment: game-phase boundary detection |
 | `extract_claims.py` | N3 optional enrichment: role-claim / accusation / suspicion extraction |
+| `extract_player_status.py` | N4 optional enrichment: player death / status tracking |
 
 ---
 

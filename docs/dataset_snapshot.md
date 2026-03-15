@@ -1,6 +1,6 @@
 # Dataset Snapshot
 
-> **Last updated:** 2026-03-14 (post-winner-metadata commit)
+> **Last updated:** 2026-03-15 (feat/player-status-tracking: N4 node added)
 > Run `python validate.py` for the current end-state check.
 
 ---
@@ -23,7 +23,7 @@ Roster vs spreadsheet discrepancies: **115** (down from 128 pre-batch; majority 
 
 ---
 
-## Enrichment coverage (N0/N1/N2/N3)
+## Enrichment coverage (N0/N1/N2/N3/N4)
 
 | Enrichment | Coverage | Notes |
 |------------|----------|-------|
@@ -31,6 +31,7 @@ Roster vs spreadsheet discrepancies: **115** (down from 128 pre-batch; majority 
 | N1 speaker_consistency | 52 / 53 | 1 missing |
 | N2 phase_detection | 53 / 53 | all covered |
 | N3 claim_extraction | 53 / 53 | 3 431 total claims |
+| N4 player_status | 2 / 53 | newly added; run `python extract_player_status.py --all` to expand |
 
 *(53 = total processable; 1 video is skip-flagged)*
 
@@ -87,4 +88,5 @@ Investigated unlinked speakers in `QbzFmlScLSA`, `nPAdvl7pySg`, `OPqWyO7h-wM` (2
 | `feat/nlp-enrichment` | N1/N2/N3 enrichment (merged to develop) | frozen |
 | `feat/player-normalization` | `normalize_player()` + alias expansion (merged to develop) | merged |
 | `feat/speaker-linking-and-roster-tools` | Speaker linking / roster tools (merged via PR #8) | frozen |
+| `feat/player-status-tracking` | Player death/status tracking (N4 node) | in progress |
 | `main` | Stable; PR #8 open develop→main | awaiting merge |

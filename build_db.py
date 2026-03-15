@@ -153,6 +153,40 @@ CREATE TABLE IF NOT EXISTS frame_scan (
 );
 CREATE INDEX IF NOT EXISTS idx_fscan_vid ON frame_scan(video_id);
 
+-- N4: player status transitions (from extract_player_status.py)
+-- One row per status change; t=0 row marks alive at game start.
+CREATE TABLE IF NOT EXISTS player_status (
+    rowid           INTEGER PRIMARY KEY,
+    video_id        TEXT NOT NULL REFERENCES videos(id),
+    timestamp_start REAL,
+    player_name     TEXT,
+    prior_status    TEXT,   -- 'alive' | 'dead' | 'unknown'
+    status          TEXT,   -- 'alive' | 'dead' | 'unknown'
+    source          TEXT,   -- 'intro_roster' | 'transcript' | 'visual'
+    confidence      REAL
+);
+CREATE INDEX IF NOT EXISTS idx_pstatus_vid ON player_status(video_id);
+
+-- N4: death events (from extract_player_status.py)
+-- One row per detected death with cause classification.
+CREATE TABLE IF NOT EXISTS death_events (
+    rowid                INTEGER PRIMARY KEY,
+    video_id             TEXT NOT NULL REFERENCES videos(id),
+    timestamp_start      REAL,
+    player_name          TEXT,
+    event_type           TEXT,   -- 'execution' | 'night_death' | 'uncertain_death'
+    source               TEXT,
+    confidence           REAL,
+    phase                TEXT,
+    source_text          TEXT,
+    inferred_round       INTEGER DEFAULT 0,
+    storyteller_anchored INTEGER DEFAULT 0,
+    header_visible       INTEGER DEFAULT 0,
+    linked_status_change INTEGER DEFAULT 0,
+    cause_confidence     REAL
+);
+CREATE INDEX IF NOT EXISTS idx_deathe_vid ON death_events(video_id);
+
 -- N3: role claims, accusations, suspicions (from extract_claims.py)
 CREATE TABLE IF NOT EXISTS claims (
     rowid           INTEGER PRIMARY KEY,
@@ -422,6 +456,60 @@ def build(db_path: Path) -> None:
             )
             claims_total += len(rows)
 
+    # ── player_status (N4 — from extract_player_status.py) ───────────────
+    pstatus_total = 0
+    for e in entries:
+        vid = e["id"]
+        pstatus_csv = Path("outputs") / vid / "player_status.csv"
+        if pstatus_csv.exists():
+            con.execute("DELETE FROM player_status WHERE video_id = ?", (vid,))
+            rows = read_csv(pstatus_csv)
+            con.executemany(
+                "INSERT INTO player_status(video_id, timestamp_start, player_name, "
+                "prior_status, status, source, confidence) VALUES (?,?,?,?,?,?,?)",
+                [
+                    (vid, float(r.get("timestamp_start", 0)), r.get("player_name", ""),
+                     r.get("prior_status", ""), r.get("status", ""),
+                     r.get("source", ""), float(r.get("confidence", 0)))
+                    for r in rows
+                ],
+            )
+            pstatus_total += len(rows)
+
+    # ── death_events (N4 — from extract_player_status.py) ────────────────
+    deathe_total = 0
+    for e in entries:
+        vid = e["id"]
+        deathe_csv = Path("outputs") / vid / "death_events.csv"
+        if deathe_csv.exists():
+            con.execute("DELETE FROM death_events WHERE video_id = ?", (vid,))
+            rows = read_csv(deathe_csv)
+            con.executemany(
+                "INSERT INTO death_events(video_id, timestamp_start, player_name, "
+                "event_type, source, confidence, phase, source_text, inferred_round, "
+                "storyteller_anchored, header_visible, linked_status_change, cause_confidence) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                [
+                    (
+                        vid,
+                        float(r.get("timestamp_start", 0)),
+                        r.get("player_name", ""),
+                        r.get("event_type", ""),
+                        r.get("source", ""),
+                        float(r.get("confidence", 0)),
+                        r.get("phase", ""),
+                        r.get("source_text", ""),
+                        int(r.get("inferred_round", 0)),
+                        int(r.get("storyteller_anchored", 0)),
+                        int(r.get("header_visible", 0)),
+                        int(r.get("linked_status_change", 0)),
+                        float(r.get("cause_confidence", 0)),
+                    )
+                    for r in rows
+                ],
+            )
+            deathe_total += len(rows)
+
     # ── frame_scan (N0 — from scan_frames.py) ────────────────────────────────
     fscan_total = 0
     for e in entries:
@@ -484,7 +572,8 @@ def build(db_path: Path) -> None:
         f"  lies={lies_total:,}   segments={segs_total:,}   "
         f"roster_players={roster_total:,}   speaker_map={spkmap_total:,}\n"
         f"  phase_labels={phase_total:,}   day_events={devents_total:,}   "
-        f"claims={claims_total:,}   frame_scan={fscan_total:,}   role_changes={rchg_total:,}"
+        f"claims={claims_total:,}   frame_scan={fscan_total:,}   role_changes={rchg_total:,}\n"
+        f"  player_status={pstatus_total:,}   death_events={deathe_total:,}"
     )
     print(f"  Built at: {datetime.now().isoformat(timespec='seconds')}")
 
