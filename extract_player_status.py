@@ -152,6 +152,18 @@ _NIGHT_TARGET_TEMPLATES: list[tuple[str, float]] = [
     (r"\bmy\s+(?:kill|target|pick)\s+(?:is\s+)?{name}\b", 0.65),
 ]
 
+# Cross-segment lookahead: when demon says kill-intent WITHOUT naming the target
+# in the same segment, the target name often appears in the immediately following
+# segment (Whisper splits at natural speech pauses).
+# Matches intent-only forms (no player name required in same segment).
+_KILL_INTENT_RE = re.compile(
+    r"\b(?:i'?ll|i\s+will|i'?m\s+(?:going\s+to|gonna)|i\s+want\s+to)\s+kill\b",
+    re.I,
+)
+
+# How far ahead (seconds) to scan for the target name after a kill-intent segment.
+_KILL_INTENT_LOOKAHEAD_S: float = 15.0
+
 
 # ── Data loading helpers ───────────────────────────────────────────────────────
 
@@ -423,6 +435,19 @@ def extract(video_id: str, force: bool = False) -> bool:
     night_target_pats: dict[str, list[tuple[re.Pattern, float]]] = {
         name: _build_night_target_patterns(name) for name in players
     }
+
+    # Name-only patterns for cross-segment lookahead (no intent clause required).
+    # Used when kill-intent fires in one segment and the target name is in the next.
+    night_target_name_pats: dict[str, list[re.Pattern]] = {}
+    for _pname in players:
+        _toks = _pname.strip().split()
+        _variants = [re.escape(_pname)]
+        if len(_toks) > 1:
+            _variants.append(re.escape(_toks[0]))  # first name only
+        night_target_name_pats[_pname] = [
+            re.compile(r"\b" + v + r"\b", re.I) for v in _variants
+        ]
+
     # Collect timestamps where each player was explicitly targeted at night.
     # These NEVER alone cause a death event.
     night_targets: dict[str, list[float]] = defaultdict(list)
@@ -468,6 +493,69 @@ def extract(video_id: str, force: bool = False) -> bool:
                     if pat.search(text):
                         night_targets[pname].append(t)
                         break  # one match per player per segment is enough
+
+    # ── Cross-segment kill-intent lookahead (Night phase) ──────────────────────
+    # Handles split transcriptions where the demon's kill-intent and the target
+    # name are in consecutive segments (e.g. "I'm going to kill" / "Bryony").
+    # Only fires during Night phase, for non-ST speakers, when the intent segment
+    # does NOT already name a player (those are fully handled above).
+    for i, row in enumerate(segs):
+        t = float(row.get("start", 0))
+        text = (row.get("text") or "").strip()
+        speaker = row.get("speaker", "")
+        if not text:
+            continue
+        if _phase_at(t, phase_labels) != "Night":
+            continue
+        if speaker in st_speakers:
+            continue
+        if not _KILL_INTENT_RE.search(text):
+            continue
+        # Skip if a player name was already present in this segment — the main
+        # loop already captured the full match; no lookahead needed.
+        speaker_canon = speaker_map.get(speaker)
+        already_named = any(
+            any(pat.search(text) for pat, _ in pats)
+            for pname, pats in night_target_pats.items()
+            if pname != speaker_canon
+        )
+        if already_named:
+            continue
+        # Scan forward within the lookahead window for a player name.
+        for j in range(i + 1, len(segs)):
+            next_row = segs[j]
+            next_t = float(next_row.get("start", 0))
+            if next_t - t > _KILL_INTENT_LOOKAHEAD_S:
+                break
+            next_text = (next_row.get("text") or "").strip()
+            if not next_text:
+                continue
+            matched_player: str | None = None
+            # First: try compiled name patterns (exact / first-name)
+            for pname, pats in night_target_name_pats.items():
+                if pname == speaker_canon:
+                    continue  # demon cannot self-target
+                for pat in pats:
+                    if pat.search(next_text):
+                        matched_player = pname
+                        break
+                if matched_player:
+                    break
+            # Fallback: resolve each word via aliases (catches transcription
+            # variants like "Bryony" → "Briony" that aren't in name patterns)
+            if not matched_player:
+                for word in next_text.split():
+                    resolved = resolve_player_name(word, aliases)
+                    if resolved and resolved in roster and resolved != speaker_canon:
+                        matched_player = resolved
+                        break
+            if matched_player:
+                night_targets[matched_player].append(t)
+                print(
+                    f"    [lookahead] kill-intent at {t:.1f}s"
+                    f" -> target '{matched_player}' found at {next_t:.1f}s"
+                )
+                break  # one target per kill-intent event
 
     # ── Deduplicate: per player, collapse events within _DEDUP_WINDOW_S ────────
     death_events: list[dict] = []
