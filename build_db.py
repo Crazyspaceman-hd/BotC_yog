@@ -190,7 +190,7 @@ CREATE INDEX IF NOT EXISTS idx_deathe_vid ON death_events(video_id);
 
 -- N4: intended night-kill targeting events (from extract_player_status.py)
 -- Records intended kill targets separately from confirmed deaths.
--- Intended target ≠ actual victim when protection, redirect, or bounce occurs.
+-- Intended target ≠ actual victim means target survived; no specific mechanic is inferred.
 CREATE TABLE IF NOT EXISTS night_target_events (
     rowid                    INTEGER PRIMARY KEY,
     video_id                 TEXT NOT NULL REFERENCES videos(id),

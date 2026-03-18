@@ -103,11 +103,12 @@ _FUZZY_MIN_TOKEN_LEN: int = 4
 # Small penalty acknowledges minor additional uncertainty vs. exact canonical spelling.
 _VARIANT_CONF_SCALE: float = 0.95
 
-# Time window (seconds) used when reconciling a night-target event to an actual
-# death.  Deaths that occur within this window after a targeting event are
-# treated as candidates for the same "night."  Generous (2 hours) to handle
-# games where ST visit dialogue precedes the Day announcement by a long gap.
-_NIGHT_TARGET_LINK_WINDOW_S: float = 7200.0
+# Time window (seconds) used when reconciling a night-target event to a confirmed
+# night-kill.  Only night_death events (not executions) within this window are
+# eligible for positive matches.  Intentionally tight: prefer no link over a
+# weak link.  10 minutes covers the longest observed night-to-morning transitions
+# in the dataset without spanning into the next day phase.
+_NIGHT_TARGET_LINK_WINDOW_S: float = 600.0
 
 # Dedup window for night_target_events: two targeting records for the same
 # speaker+target within this window are collapsed to the higher-confidence one.
@@ -1028,37 +1029,48 @@ def extract(video_id: str, force: bool = False) -> bool:
     #   did_not_match_actual_death — target survived; someone else died that night
     #   no_confirmed_death         — no death detected in the look-ahead window
     #   unknown                    — cannot determine (e.g. death before targeting)
-    death_lookup: dict[str, float] = {
+    # Two death lookups for reconciliation.  Only night_death events are used for
+    # positive matches: executions are day-phase events and must never be linked
+    # to a night targeting record.  all_death_lookup is used only for the edge
+    # case where the target died before the targeting event was recorded.
+    night_death_lookup: dict[str, float] = {
+        d["player_name"]: d["timestamp_start"]
+        for d in final_deaths
+        if d["event_type"] == "night_death"
+    }
+    all_death_lookup: dict[str, float] = {
         d["player_name"]: d["timestamp_start"] for d in final_deaths
     }
     for rec in nte_deduped:
         t_evt = rec["timestamp_start"]
         target = rec["target_player"]
-        target_death_t = death_lookup.get(target)
+        target_nd_t = night_death_lookup.get(target)   # night-kill timestamp, if any
+        target_any_t = all_death_lookup.get(target)    # any-cause death, if any
 
-        if target_death_t is not None and target_death_t > t_evt:
-            # Target player died after the targeting event — direct match
+        if (target_nd_t is not None
+                and t_evt < target_nd_t <= t_evt + _NIGHT_TARGET_LINK_WINDOW_S):
+            # Night-kill of the target within the night window — direct match.
             rec["outcome_relation"] = "matched_actual_death"
             rec["linked_death_player"] = target
-            rec["linked_death_timestamp"] = round(target_death_t, 2)
-        elif target_death_t is not None and target_death_t <= t_evt:
-            # Target died BEFORE the targeting event — unusual; flag as unknown
+            rec["linked_death_timestamp"] = round(target_nd_t, 2)
+        elif target_any_t is not None and target_any_t <= t_evt:
+            # Target was already dead before this targeting event — flag as unknown.
             rec["outcome_relation"] = "unknown"
             rec["linked_death_player"] = target
-            rec["linked_death_timestamp"] = round(target_death_t, 2)
+            rec["linked_death_timestamp"] = round(target_any_t, 2)
         else:
-            # Target has no confirmed death after this event.
-            # Check whether someone else died in the look-ahead window
-            # (suggests protection, redirect, or bounce effect).
-            other_deaths_after = [
+            # No matching night-kill of the target within the window.
+            # Check for other night-kills in the same narrow window.
+            # Records that target != victim without evidence of why are kept as-is;
+            # no mechanic (protection / redirect / bounce) is inferred from mismatch.
+            other_nd = [
                 d for d in final_deaths
                 if d["player_name"] != target
-                and d["timestamp_start"] > t_evt
-                and d["timestamp_start"] <= t_evt + _NIGHT_TARGET_LINK_WINDOW_S
+                and d["event_type"] == "night_death"
+                and t_evt < d["timestamp_start"] <= t_evt + _NIGHT_TARGET_LINK_WINDOW_S
             ]
-            if other_deaths_after:
-                # Pick the earliest death in the window as the likely actual victim
-                actual = min(other_deaths_after, key=lambda d: d["timestamp_start"])
+            if other_nd:
+                actual = min(other_nd, key=lambda d: d["timestamp_start"])
                 rec["outcome_relation"] = "did_not_match_actual_death"
                 rec["linked_death_player"] = actual["player_name"]
                 rec["linked_death_timestamp"] = round(actual["timestamp_start"], 2)

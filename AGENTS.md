@@ -12,13 +12,15 @@ for the full system architecture.
 | `docs/dev_commands.md` | Quick command reference |
 | `docs/agent_rules.md` | Rules for agents working in this repo |
 | `docs/dataset_snapshot.md` | Current dataset state and known gaps |
+| `docs/project_charter.md` | Strategic north star |
 | `botc_ui.py` | Single source of truth for role data — never hardcode roles or teams |
 | `pipeline_utils.py` | Shared helpers — use `normalize_role()`, `display_role()`, `normalize_player()`, `resolve_player_name()` |
 | `build_db.py` | Rebuilds `botc.db` from outputs — run after any data change |
 | `validate.py` | End-state validator — run after any pipeline phase |
 | `scan_frames.py` | N0 enrichment: visual game-phase signal extraction from video frames |
-| `extract_player_status.py` | N4 enrichment: player death detection → `player_status.csv` + `death_events.csv` |
+| `extract_player_status.py` | N4 enrichment: player death detection → `player_status.csv` + `death_events.csv` + `night_target_events.csv` |
 | `compare_rosters.py` | Diffs DB roster against the episode spreadsheet — track data gaps |
+
 
 ## Never do without being asked
 - Modify `botc.db` schema
