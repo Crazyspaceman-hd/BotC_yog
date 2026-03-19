@@ -75,6 +75,8 @@ B+C ──► D. video.merge
          E. video.patch      (optional but recommended)
          |
          └─► [N2. speaker.day_boundary_detection] ← optional, writes phase_labels.csv + day_events.csv
+                   |
+                   └─► [N2b. context.segment_labelling]  ← optional, writes context_segments.csv
 
 A ──► F. video.scrape       (independent of B/C/D — reads video.mp4 directly)
       |
@@ -88,7 +90,7 @@ E/F+overrides ──► G. video.analyze
                    |
                    ├─► [N3. content.claim_propagation] ← optional, writes claims.csv + claim_graph.json
                    |
-                   ├─► [N4. content.player_status_tracking] ← optional, writes player_status.csv + death_events.csv + night_target_events.csv
+                   ├─► [N4. content.player_status_tracking] ← optional, reads context_segments.csv (N2b), writes player_status.csv + death_events.csv + night_target_events.csv
                    |
                    v
                    J. data.build_db       (cross-video, reads all G outputs)
@@ -102,7 +104,7 @@ E/F+overrides ──► G. video.analyze
                    (any phase) ──► M. validate.end_state
 ```
 
-**N0/N1/N2/N3/N4 are optional enrichment nodes.** They do not affect playlist.json status, do not block any existing step, and are not required by J (build_db). N0 writes directly to `botc.db` (frame_scan table); N1–N4 write new artifact files alongside existing outputs.
+**N0/N1/N2/N2b/N3/N4 are optional enrichment nodes.** They do not affect playlist.json status, do not block any existing step, and are not required by J (build_db). N0 writes directly to `botc.db` (frame_scan table); N1–N4 and N2b write new artifact files alongside existing outputs.
 
 **Notes:**
 - `F. video.scrape` can run after `A. video.download` (only needs `video.mp4`).
@@ -461,6 +463,7 @@ bash scripts/run_all.sh
 | Player status (N4) | `outputs/<id>/player_status.csv` | No (gitignored) | Via N4 (`extract_player_status.py`) |
 | Death events (N4) | `outputs/<id>/death_events.csv` | No (gitignored) | Via N4 (`extract_player_status.py`) |
 | Night target events (N4) | `outputs/<id>/night_target_events.csv` | No (gitignored) | Via N4 (`extract_player_status.py`) |
+| Context segments (N2b) | `outputs/<id>/context_segments.csv` | No (gitignored) | Via N2b (`generate_context_segments.py`) |
 | Landing page HTML | `landing.html` | No (gitignored) | Via step L |
 | Live landing page | `gh-pages:index.html` | Yes (separate branch) | Via `deploy_pages.sh` |
 
@@ -514,6 +517,23 @@ bash scripts/run_all.sh
 
 ---
 
+## N2b. context.segment_labelling  [optional enrichment]
+
+| Field | Value |
+|-------|-------|
+| **Purpose** | Synthesize fine-grained interpretation context for each time interval; bridge N2 phase labels and N4 death/target extraction; make interpretive decisions explicit and inspectable |
+| **Script** | `generate_context_segments.py` |
+| **Per-video?** | Yes |
+| **Slot** | After N2 (phase_detection) — reads `phase_labels.csv` + `day_events.csv` |
+| **Inputs** | `outputs/<id>/phase_labels.csv` (N2, required); `outputs/<id>/day_events.csv` (N2, optional) |
+| **Outputs** | `outputs/<id>/context_segments.csv` — one row per time interval (columns: timestamp_start, timestamp_end, broad_phase, context_mode, speaker_type, audience_scope, confidence, source) |
+| **Command** | `python generate_context_segments.py <video_id>` \| `python generate_context_segments.py --all` |
+| **Acceptance** | `context_segments.csv` exists; rows cover full video duration from phase_labels; `context_mode` values are one of the documented set |
+| **Downstream** | N4 (`extract_player_status.py`) — consumes for night-target scope and confidence adjustments |
+| **Notes** | Non-destructive: no other artifacts touched. Absence does not break N4 — N4 falls back to raw `_phase_at()` lookup. Context modes: `intro_meta`, `night_private_action`, `storyteller_narration`, `morning_result_announcement`, `public_day_discussion`, `execution_window`, `ambiguous`. Day phases are sub-divided by VoteSequence and StorytellerInterruption events. Morning window (first 600 s of a Day following a Night) labelled `morning_result_announcement`. Contract: `docs/context_contract.md`. |
+
+---
+
 ## N3. content.claim_propagation  [optional enrichment]
 
 | Field | Value |
@@ -538,7 +558,7 @@ bash scripts/run_all.sh
 | **Script** | `extract_player_status.py` |
 | **Per-video?** | Yes |
 | **Slot** | After G (analyze) — reads roster data, segments, and optional N2 phase labels + N0 frame scan |
-| **Inputs** | `segments_patched.csv` (fallback: `segments.csv`), `intro_roster.json`, `roster_overrides.json` (optional), `phase_labels.csv` (N2, optional), `day_events.csv` (N2b, optional), `frame_scan.json` (N0, optional) |
+| **Inputs** | `segments_patched.csv` (fallback: `segments.csv`), `intro_roster.json`, `roster_overrides.json` (optional), `phase_labels.csv` (N2, optional), `day_events.csv` (N2, optional), `context_segments.csv` (N2b, optional), `frame_scan` rows from `botc.db` (N0, optional) |
 | **Outputs** | `outputs/<id>/player_status.csv` (per-player status transitions), `outputs/<id>/death_events.csv` (one row per death), `outputs/<id>/night_target_events.csv` (one row per intended kill target), `outputs/<id>/name_resolution_debug.csv` (optional — emitted when ≥1 variant found) |
 | **Command** | `python extract_player_status.py <video_id>` \| `python extract_player_status.py --all` |
 | **Acceptance** | Both CSVs exist; `death_events.csv` `event_type` column contains only `{execution, night_death, uncertain_death}`; no rows with confidence below threshold |
@@ -560,6 +580,7 @@ bash scripts/run_all.sh
 | `validate.py` | End-state validator — run after any pipeline phase |
 | `speaker_consistency.py` | N1 optional enrichment: smooths diarization fragmentation |
 | `detect_phases.py` | N2 optional enrichment: game-phase boundary detection |
+| `generate_context_segments.py` | N2b optional enrichment: context labelling from N2 outputs → `context_segments.csv` |
 | `extract_claims.py` | N3 optional enrichment: role-claim / accusation / suspicion extraction |
 | `extract_player_status.py` | N4 optional enrichment: player death / status tracking |
 

@@ -124,6 +124,13 @@ _SELF_DECL_REACTION_WINDOW_S: float = 60.0
 # self-declaration suppression. Filters accidental name mentions.
 _SELF_DECL_REACTION_MIN_CONF: float = 0.70
 
+# Confidence boost when a death signal falls during morning_result_announcement
+# context (start of Day after Night — ST announcing last night's death).
+_CONTEXT_MORNING_CONF_BOOST: float = 0.08
+
+# Confidence boost for execution-type signals during execution_window context.
+_CONTEXT_EXECUTION_CONF_BOOST: float = 0.05
+
 # ── Status vocabulary ──────────────────────────────────────────────────────────
 
 STATUS_ALIVE = "alive"
@@ -288,6 +295,20 @@ def _load_day_events(out_dir: Path) -> list[dict]:
         return list(csv.DictReader(fh))
 
 
+def _load_context_segments(out_dir: Path) -> list[dict]:
+    """Return context_segments.csv rows (N2b output), sorted by timestamp_start.
+
+    Returns [] if absent — consumers must handle gracefully (fall back to raw phase lookup).
+    """
+    p = out_dir / "context_segments.csv"
+    if not p.exists():
+        return []
+    with p.open(encoding="utf-8", newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    rows.sort(key=lambda r: float(r.get("timestamp_start", 0)))
+    return rows
+
+
 def _load_frame_scan(video_id: str) -> list[tuple[float, int]]:
     """Return [(t, header_visible)] sorted by t."""
     if not DB_PATH.exists():
@@ -312,6 +333,27 @@ def _phase_at(t: float, labels: list[dict]) -> str:
         if float(row["start"]) <= t:
             return row.get("phase", "Unknown")
     return "Unknown"
+
+
+def _context_at(t: float, ctx_segs: list[dict]) -> tuple[str, str]:
+    """Return (context_mode, audience_scope) for timestamp t.
+
+    ctx_segs must be sorted ascending by timestamp_start (guaranteed by _load_context_segments).
+    Returns ("ambiguous", "ambiguous") when ctx_segs is empty or t precedes all rows.
+    Consumers must treat unknown context_mode values as "ambiguous" per the contract.
+    """
+    mode = "ambiguous"
+    scope = "ambiguous"
+    for row in ctx_segs:
+        try:
+            if float(row["timestamp_start"]) <= t:
+                mode = row.get("context_mode", "ambiguous")
+                scope = row.get("audience_scope", "ambiguous")
+            else:
+                break  # rows sorted ascending — no later row can match
+        except (KeyError, ValueError):
+            continue
+    return mode, scope
 
 
 def _round_at(t: float, labels: list[dict]) -> int:
@@ -610,6 +652,9 @@ def extract(video_id: str, force: bool = False) -> bool:
     phase_labels = _load_phase_labels(out_dir)
     day_evts = _load_day_events(out_dir)
     frame_scan = _load_frame_scan(video_id)
+    ctx_segs = _load_context_segments(out_dir)
+    if ctx_segs:
+        print(f"  Context segments: {len(ctx_segs)} rows loaded")
 
     # Identify storyteller speaker(s): highest word count in first INTRO_CUTOFF_S.
     # Self-declarations from the storyteller are NOT player deaths and must be suppressed.
@@ -719,11 +764,18 @@ def extract(video_id: str, force: bool = False) -> bool:
                     (t, 0.60, "self_declaration", text[:120], speaker)
                 )
 
-        # --- night-target collection (Night phase, non-ST speakers only) ---
-        # Demon choosing a kill target. Night-phase filter limits false positives
-        # from Day discussion ("I'm going to kill Duncan in the vote").
+        # --- night-target collection (Night phase or private_like context) ---
+        # Demon choosing a kill target.  We restrict to Night phase OR to
+        # private_like Day windows (StorytellerInterruption events where the demon
+        # whispers their kill choice to the ST at end of Day).  Both contexts
+        # suppress the common false positive of "I'll kill X" in public Day
+        # discussion about executions.
         # A player cannot be their own target (demon cannot self-kill in BotC).
-        if _phase_at(t, phase_labels) == "Night" and speaker not in st_speakers:
+        _is_private = (
+            _phase_at(t, phase_labels) == "Night"
+            or (bool(ctx_segs) and _context_at(t, ctx_segs)[1] == "private_like")
+        )
+        if _is_private and speaker not in st_speakers:
             speaker_canon = speaker_map.get(speaker)
             for pname, pats in night_target_pats.items():
                 if speaker_canon == pname:
@@ -761,7 +813,11 @@ def extract(video_id: str, force: bool = False) -> bool:
         speaker = row.get("speaker", "")
         if not text:
             continue
-        if _phase_at(t, phase_labels) != "Night":
+        _is_private_lookahead = (
+            _phase_at(t, phase_labels) == "Night"
+            or (bool(ctx_segs) and _context_at(t, ctx_segs)[1] == "private_like")
+        )
+        if not _is_private_lookahead:
             continue
         if speaker in st_speakers:
             continue
@@ -883,6 +939,20 @@ def extract(video_id: str, force: bool = False) -> bool:
             # Apply header-visible confidence boost
             if _header_visible_near(t, frame_scan):
                 conf = min(1.0, conf + _HEADER_CONF_BOOST)
+
+            # Apply context-based confidence adjustments (requires context_segments.csv).
+            # Morning context: death announcements at Day start after Night have a high
+            # prior probability of being real night-death announcements from the ST.
+            # Execution context: execution-type signals during active vote sequences are
+            # corroborated by the timing evidence already baked into the VoteSequence.
+            if ctx_segs:
+                ctx_mode, _ = _context_at(t, ctx_segs)
+                if ctx_mode == "morning_result_announcement" and hint in (
+                    "night_death", "uncertain_death"
+                ):
+                    conf = min(1.0, conf + _CONTEXT_MORNING_CONF_BOOST)
+                elif ctx_mode == "execution_window" and hint == "execution":
+                    conf = min(1.0, conf + _CONTEXT_EXECUTION_CONF_BOOST)
 
             if conf < _MIN_CONF:
                 continue
