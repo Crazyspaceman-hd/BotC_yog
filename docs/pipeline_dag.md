@@ -1,7 +1,7 @@
 # BotC_yog — Pipeline DAG
 
-> **Last updated:** 2026-03-15
-> **State:** covers all scripts present on `feat/player-status-tracking` as of 2026-03-15; N0–N4 are optional enrichment nodes; player-name normalization via `normalize_player()` added to `pipeline_utils.py`
+> **Last updated:** 2026-03-18
+> **State:** covers all scripts present on `feat/player-status-tracking` as of 2026-03-18; N0–N5 are optional enrichment nodes; player-name normalization via `normalize_player()` added to `pipeline_utils.py`
 
 ---
 
@@ -16,6 +16,7 @@ The system has five layers:
 | **Curation** | `auto_assign_speakers.py`, `fix_rosters.py` | cross-video |
 | **Publish** | `build_db.py`, `generate_landing.py`, `deploy_pages.sh` | global |
 | **Validation** | `validate.py` | global, run after any phase |
+| **Enrichment** | N0–N5 optional nodes | per-video, non-blocking |
 
 Canonical state is stored in:
 - `playlist.json` — video registry + processing status + per-game flags (committed)
@@ -91,6 +92,8 @@ E/F+overrides ──► G. video.analyze
                    ├─► [N3. content.claim_propagation] ← optional, writes claims.csv + claim_graph.json
                    |
                    ├─► [N4. content.player_status_tracking] ← optional, reads context_segments.csv (N2b), writes player_status.csv + death_events.csv + night_target_events.csv
+                   |        |
+                   |        └─► [N5. content.execution_context] ← optional, reads context_segments.csv (N2b), writes execution_context_events.csv
                    |
                    v
                    J. data.build_db       (cross-video, reads all G outputs)
@@ -104,7 +107,7 @@ E/F+overrides ──► G. video.analyze
                    (any phase) ──► M. validate.end_state
 ```
 
-**N0/N1/N2/N2b/N3/N4 are optional enrichment nodes.** They do not affect playlist.json status, do not block any existing step, and are not required by J (build_db). N0 writes directly to `botc.db` (frame_scan table); N1–N4 and N2b write new artifact files alongside existing outputs.
+**N0/N1/N2/N2b/N3/N4/N5 are optional enrichment nodes.** They do not affect playlist.json status, do not block any existing step, and are not required by J (build_db). N0 writes directly to `botc.db` (frame_scan table); N1–N5 and N2b write new artifact files alongside existing outputs.
 
 **Notes:**
 - `F. video.scrape` can run after `A. video.download` (only needs `video.mp4`).
@@ -174,11 +177,28 @@ one during Day).
 | `night_death` | Death by night action (demon kill, poisoner, etc.) |
 | `uncertain_death` | Death confirmed but cause not classifiable from signals |
 
-N4 consumes phase_labels (N2) and day_events (N2b) for temporal context and cause
+N4 consumes phase_labels (N2) and context_segments (N2b) for temporal context and cause
 classification. Visual corroboration from frame_scan (N0) provides a confidence boost
 when the header bar is visible at the time of the death signal.
 Conservative policy: false negatives preferred over false positives — only
 emit a death event when confidence ≥ 0.45.
+
+**Public execution events** — produced by N5 (execution_context / `extract_execution_context.py`):
+
+| Event Type | Description |
+|------------|-------------|
+| `public_kill_pressure` | Player explicitly pushed for another player's execution ("we should kill X", "vote for X", "X should die") |
+| `nomination_reference` | Player explicitly nominated another by name ("I nominate X", "nominating X") |
+| `execution_result_narration` | ST (or confirmed narrator) announcing execution outcome ("Goodbye X", "X was executed", "X, last words") |
+| `execution_opposition` | Speaker defending a player against execution push ("don't kill X", "X is innocent") |
+
+N5 consumes context_segments (N2b) to gate patterns strictly to public Day context
+(`public_day_discussion` or `execution_window` audience_scope). This prevents "kill X"
+language in private Night or StorytellerInterruption segments (where a demon selects
+their night target) from leaking into public execution-pressure records. N4 captures
+private kill intent; N5 captures public execution pressure — the two are disjoint.
+Conservative policy: false negatives preferred — `_MIN_CONF = 0.60` (higher than N4's
+0.45, reflecting noisier public-day language).
 
 ---
 
@@ -464,6 +484,7 @@ bash scripts/run_all.sh
 | Death events (N4) | `outputs/<id>/death_events.csv` | No (gitignored) | Via N4 (`extract_player_status.py`) |
 | Night target events (N4) | `outputs/<id>/night_target_events.csv` | No (gitignored) | Via N4 (`extract_player_status.py`) |
 | Context segments (N2b) | `outputs/<id>/context_segments.csv` | No (gitignored) | Via N2b (`generate_context_segments.py`) |
+| Execution context events (N5) | `outputs/<id>/execution_context_events.csv` | No (gitignored) | Via N5 (`extract_execution_context.py`) |
 | Landing page HTML | `landing.html` | No (gitignored) | Via step L |
 | Live landing page | `gh-pages:index.html` | Yes (separate branch) | Via `deploy_pages.sh` |
 
@@ -566,6 +587,23 @@ bash scripts/run_all.sh
 
 ---
 
+## N5. content.execution_context  [optional enrichment]
+
+| Field | Value |
+|-------|-------|
+| **Purpose** | Extract public kill pressure, nomination references, and execution-result narration from the game transcript, gated strictly to public Day context via the context layer (N2b) |
+| **Script** | `extract_execution_context.py` |
+| **Per-video?** | Yes |
+| **Slot** | After G (analyze) and N2b (context labelling) — reads `segments_patched.csv` + `context_segments.csv` |
+| **Inputs** | `segments_patched.csv` (fallback: `segments_consistent.csv`, `segments.csv`), `intro_roster.json`, `roster_overrides.json` (optional), `phase_labels.csv` (N2, optional), `context_segments.csv` (N2b, optional) |
+| **Outputs** | `outputs/<id>/execution_context_events.csv` — one row per execution-context event (columns: timestamp_start, speaker, source_player_name, target_player, target_role_if_any, event_type, confidence, context_mode, phase, source_text) |
+| **Command** | `python extract_execution_context.py <video_id>` \| `python extract_execution_context.py --all` |
+| **Acceptance** | `execution_context_events.csv` exists (empty CSV with header is valid if no qualifying events); `event_type` column contains only `{public_kill_pressure, nomination_reference, execution_result_narration, execution_opposition}`; no events in private_like context |
+| **Downstream** | Future vote-reconstruction and nomination-graph analytics (not yet implemented) |
+| **Notes** | **Context gate (strict):** `public_kill_pressure`, `nomination_reference`, and `execution_opposition` fire ONLY when `audience_scope == "public"` AND `phase == "Day"` AND `context_mode in {public_day_discussion, execution_window}`. This prevents Night-phase and StorytellerInterruption private-like segments from producing day-pressure events. `execution_result_narration` fires in any Day context and is boosted when spoken by the Storyteller speaker AND in `execution_window` or `morning_result_announcement` context. **N4/N5 disjoint guarantee:** N4 captures private kill intent (Night + private_like); N5 captures public execution pressure (public Day only) — the audience_scope gate in context_segments.csv is the enforcing boundary. Conservative: `_MIN_CONF = 0.60`. Same alias + fuzzy name-variant discovery as N4 (`_FUZZY_NAME_THRESHOLD = 0.78`). Deduplication: same (speaker, target_player, event_type) within 30 s → keep highest confidence. `--force` flag to overwrite existing output. **Batch run across 47 videos:** 245 total events (nomination_reference=114, public_kill_pressure=113, execution_result_narration=9, execution_opposition=9). |
+
+---
+
 ## Scripts Not in the DAG (Support / Utility)
 
 | Script | Role |
@@ -583,6 +621,7 @@ bash scripts/run_all.sh
 | `generate_context_segments.py` | N2b optional enrichment: context labelling from N2 outputs → `context_segments.csv` |
 | `extract_claims.py` | N3 optional enrichment: role-claim / accusation / suspicion extraction |
 | `extract_player_status.py` | N4 optional enrichment: player death / status tracking |
+| `extract_execution_context.py` | N5 optional enrichment: public execution-context event extraction → `execution_context_events.csv` |
 
 ---
 

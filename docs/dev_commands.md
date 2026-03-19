@@ -36,7 +36,7 @@ python validate.py --strict                                # fail on warnings to
 python validate.py --json                                  # machine-readable output
 ```
 
-## Optional enrichments (N0/N1/N2/N2b/N3/N4)
+## Optional enrichments (N0/N1/N2/N2b/N3/N4/N5)
 ```bash
 python scan_frames.py <video_id>                           # N0: visual phase signal extraction
 python speaker_consistency.py <video_id>                   # N1: smooth diarization
@@ -49,6 +49,9 @@ python extract_claims.py <video_id>                        # N3: claim/event ext
 python extract_player_status.py <video_id>                 # N4: player death / status tracking
 python extract_player_status.py <video_id> --force         # N4: re-run, overwriting existing output
 python extract_player_status.py --all                      # N4: run on all analyzed videos
+python extract_execution_context.py <video_id>             # N5: public execution-context events (run after N2b)
+python extract_execution_context.py <video_id> --force     # N5: re-run, overwriting existing output
+python extract_execution_context.py --all                  # N5: run on all analyzed videos
 ```
 
 ## Full orchestrated run
