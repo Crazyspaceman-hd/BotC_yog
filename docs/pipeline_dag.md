@@ -1,7 +1,7 @@
 # BotC_yog — Pipeline DAG
 
 > **Last updated:** 2026-03-19
-> **State:** covers all scripts present on `feat/player-status-tracking` as of 2026-03-19; N0–N6 are optional enrichment nodes; player-name normalization via `normalize_player()` added to `pipeline_utils.py`
+> **State:** covers all scripts present on `feat/player-status-tracking` as of 2026-03-19; N0–N7 are optional enrichment nodes; player-name normalization via `normalize_player()` added to `pipeline_utils.py`
 
 ---
 
@@ -16,7 +16,7 @@ The system has five layers:
 | **Curation** | `auto_assign_speakers.py`, `fix_rosters.py` | cross-video |
 | **Publish** | `build_db.py`, `generate_landing.py`, `deploy_pages.sh` | global |
 | **Validation** | `validate.py` | global, run after any phase |
-| **Enrichment** | N0–N6 optional nodes | per-video, non-blocking |
+| **Enrichment** | N0–N7 optional nodes | per-video, non-blocking |
 
 Canonical state is stored in:
 - `playlist.json` — video registry + processing status + per-game flags (committed)
@@ -96,6 +96,8 @@ E/F+overrides ──► G. video.analyze
                    |        └─► [N5. content.execution_context] ← optional, reads context_segments.csv (N2b), writes execution_context_events.csv
                    |                  |
                    |                  └─► [N6. content.execution_episodes] ← optional, reads day_events.csv (N2) + execution_context_events.csv (N5), writes execution_episodes.csv
+                   |                             |
+                   |                             └─► [N7. content.execution_claim_context] ← optional, reads execution_episodes.csv (N6) + claims.csv (N3), writes execution_claim_context.csv
                    |
                    v
                    J. data.build_db       (cross-video, reads all G outputs)
@@ -109,7 +111,7 @@ E/F+overrides ──► G. video.analyze
                    (any phase) ──► M. validate.end_state
 ```
 
-**N0/N1/N2/N2b/N3/N4/N5/N6 are optional enrichment nodes.** They do not affect playlist.json status, do not block any existing step, and are not required by J (build_db). N0 writes directly to `botc.db` (frame_scan table); N1–N6 and N2b write new artifact files alongside existing outputs.
+**N0/N1/N2/N2b/N3/N4/N5/N6/N7 are optional enrichment nodes.** They do not affect playlist.json status, do not block any existing step, and are not required by J (build_db). N0 writes directly to `botc.db` (frame_scan table); N1–N7 and N2b write new artifact files alongside existing outputs.
 
 **Notes:**
 - `F. video.scrape` can run after `A. video.download` (only needs `video.mp4`).
@@ -220,6 +222,27 @@ one is inferred from pre-vote town discussion, the other confirmed from result n
 These can differ (town pushes player A but executes player B via a different nomination),
 which is meaningful game data. Conservative: target is left blank when evidence is
 ambiguous (competing candidates within _AMBIGUITY_RATIO=1.4 and _AMBIGUITY_GAP=0.20).
+
+**Execution claim context** — produced by N7 (execution_claim_context / `build_execution_claim_context.py`):
+
+| Field | Description |
+|-------|-------------|
+| `target_claimed_role` | The role the likely_target_player was publicly claiming near the vote; blank if no qualifying claim exists |
+| `result_claimed_role` | The role the execution_result_player was claiming when executed; blank if no qualifying claim exists |
+| `*_claim_confidence` | Confidence of the selected claim (from N3 claims.csv) |
+| `*_claim_type` | Event type of the selected claim (`role_claim`) |
+| `*_claim_text` | First 100 chars of the claim utterance (for inspection) |
+| `*_claim_source_timestamp` | When the claim was made (seconds from start) |
+| `*_claim_recency_s` | Seconds between claim and vote_window_start (staleness measure) |
+| `*_claim_stale` | `true` if recency > 5400 s — flag only; stale claims are still included |
+| `*_claim_match_status` | `lie` (verified_lie==true), `truthful` (claimed == actual), or `unverified` |
+| `*_claim_speaker` | Player who made the claim (always the player themselves for role_claim) |
+
+N7 joins each N6 episode row with N3 claims.csv using a conservative per-player lookup.
+Claim selection policy: most recent role_claim with confidence ≥ 0.35 before vote_window_end,
+sorted by confidence DESC → intro-phase tier → recency DESC. If no qualifying claim exists,
+all claim fields are left blank (false negative preferred over forced guess).
+target and result player claims are resolved independently.
 
 ---
 
@@ -507,6 +530,7 @@ bash scripts/run_all.sh
 | Context segments (N2b) | `outputs/<id>/context_segments.csv` | No (gitignored) | Via N2b (`generate_context_segments.py`) |
 | Execution context events (N5) | `outputs/<id>/execution_context_events.csv` | No (gitignored) | Via N5 (`extract_execution_context.py`) |
 | Execution episodes (N6) | `outputs/<id>/execution_episodes.csv` | No (gitignored) | Via N6 (`build_execution_episodes.py`) |
+| Execution claim context (N7) | `outputs/<id>/execution_claim_context.csv` | No (gitignored) | Via N7 (`build_execution_claim_context.py`) |
 | Landing page HTML | `landing.html` | No (gitignored) | Via step L |
 | Live landing page | `gh-pages:index.html` | Yes (separate branch) | Via `deploy_pages.sh` |
 
@@ -643,6 +667,22 @@ bash scripts/run_all.sh
 
 ---
 
+## N7. content.execution_claim_context  [optional enrichment]
+
+| Field | Value |
+|-------|-------|
+| **Purpose** | Join N6 execution episodes with N3 role claims to describe what role each player was publicly claiming near the time they were nominated or executed |
+| **Script** | `build_execution_claim_context.py` |
+| **Per-video?** | Yes |
+| **Slot** | After N6 (execution_episodes) and N3 (claim_extraction) — reads `execution_episodes.csv` + `claims.csv` |
+| **Inputs** | `execution_episodes.csv` (N6, required), `claims.csv` (N3, optional — all claim fields blank if absent) |
+| **Outputs** | `outputs/<id>/execution_claim_context.csv` — one row per execution episode (all N6 episode fields plus target/result claim fields; see Game Phases section above) |
+| **Command** | `python build_execution_claim_context.py <video_id>` \| `python build_execution_claim_context.py --all` |
+| **Acceptance** | `execution_claim_context.csv` exists with one row per N6 episode; blank claim fields when no qualifying claim found (not a failure); `target_claim_match_status` and `result_claim_match_status` contain only `{lie, truthful, unverified, ""}` |
+| **Notes** | **Claim selection:** `event_type == role_claim`, `confidence >= 0.35` (`_CLAIM_MIN_CONF`), `timestamp_seconds <= vote_window_end`. Sort priority: confidence DESC → intro-phase tier DESC → recency DESC. This prioritises explicit hard claims (conf 0.85) over garbled N3 fragments (conf 0.425), and Intro-phase reveals over in-game declarations. **Staleness:** `claim_recency_s = vote_window_start - claim_timestamp`. Claims older than 5400 s (`_CLAIM_STALE_S`) are flagged `claim_stale=true` but still included — the consumer decides whether to filter them. **False-negative policy:** blank is always preferred over a forced guess. No claim interpolation, no belief-state reconstruction. **Player matching:** exact case-insensitive match on `player_name` from claims.csv — videos with incomplete roster linking (e.g. `speaker_0`/`speaker_1` as player_name) produce zero resolved claims; this is expected conservative behaviour. **Batch results (47 videos):** 311 episodes, target_claimed_role resolved: 52/311 (17%), result_claimed_role resolved: 3/311 (1%), lies detected: 17 episodes. |
+
+---
+
 ## Scripts Not in the DAG (Support / Utility)
 
 | Script | Role |
@@ -662,6 +702,7 @@ bash scripts/run_all.sh
 | `extract_player_status.py` | N4 optional enrichment: player death / status tracking |
 | `extract_execution_context.py` | N5 optional enrichment: public execution-context event extraction → `execution_context_events.csv` |
 | `build_execution_episodes.py` | N6 optional enrichment: execution-episode aggregation from N2 vote windows + N5 events → `execution_episodes.csv` |
+| `build_execution_claim_context.py` | N7 optional enrichment: claimed-role-at-execution join from N6 episodes + N3 claims → `execution_claim_context.csv` |
 
 ---
 
