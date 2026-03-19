@@ -1,7 +1,7 @@
 # Context Segments — Artifact Contract
 
 > **Last updated:** 2026-03-18
-> **Status:** v1 — produced by `generate_context_segments.py` (N2b), consumed by N4
+> **Status:** v1 — produced by `generate_context_segments.py` (N2b), consumed by N4, N5
 
 ---
 
@@ -120,6 +120,27 @@ Uses `context_segments.csv` for two improvements over raw phase-label lookup:
 
 Fallback: if `context_segments.csv` is absent, N4 falls back to raw
 `_phase_at()` / `_has_vote_sequence_before()` lookups — identical to pre-v1 behaviour.
+
+---
+
+### N5 — `extract_execution_context.py`
+
+Uses `context_segments.csv` to gate public execution-pressure patterns strictly to
+public Day intervals.  The `audience_scope` field is the critical gate:
+
+- `audience_scope == "public"` in `context_mode in {public_day_discussion, execution_window}`
+  → N5 fires `public_kill_pressure`, `nomination_reference`, `execution_opposition`
+- `audience_scope == "private_like"` → N5 skips the segment entirely
+
+This is the key **N4/N5 disjoint guarantee**: "kill X" language said during a
+`StorytellerInterruption` (private_like) stays in N4's night-target scan only;
+"kill X" said during public Day discussion goes to N5 only.
+
+`execution_result_narration` is gated to `Day` phase only (any context mode), with
+confidence boosts for `execution_window` and `morning_result_announcement` contexts.
+
+Fallback: if `context_segments.csv` is absent, N5 falls back to raw `phase == "Day"`
+check and assumes `public_day_discussion` for all Day segments.
 
 ---
 

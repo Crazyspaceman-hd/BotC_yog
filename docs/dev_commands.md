@@ -52,6 +52,9 @@ python extract_player_status.py --all                      # N4: run on all anal
 python extract_execution_context.py <video_id>             # N5: public execution-context events (run after N2b)
 python extract_execution_context.py <video_id> --force     # N5: re-run, overwriting existing output
 python extract_execution_context.py --all                  # N5: run on all analyzed videos
+python build_execution_episodes.py <video_id>              # N6: execution episodes (run after N5)
+python build_execution_episodes.py <video_id> --force     # N6: re-run, overwriting existing output
+python build_execution_episodes.py --all                   # N6: run on all videos with day_events
 ```
 
 ## Full orchestrated run

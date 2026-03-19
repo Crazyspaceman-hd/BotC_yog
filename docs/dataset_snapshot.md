@@ -1,6 +1,6 @@
 # Dataset Snapshot
 
-> **Last updated:** 2026-03-15 (feat/player-status-tracking: N4 night target events)
+> **Last updated:** 2026-03-19 (feat/player-status-tracking: N5 execution context, N6 execution episodes)
 > Run `python validate.py` for the current end-state check.
 
 ---
@@ -23,15 +23,18 @@ Roster vs spreadsheet discrepancies: **115** (down from 128 pre-batch; majority 
 
 ---
 
-## Enrichment coverage (N0/N1/N2/N3/N4)
+## Enrichment coverage (N0/N1/N2/N2b/N3/N4/N5/N6)
 
 | Enrichment | Coverage | Notes |
 |------------|----------|-------|
 | N0 scan_frames | 48 / 53 | 5 missing (members-only / no video) |
 | N1 speaker_consistency | 52 / 53 | 1 missing |
 | N2 phase_detection | 53 / 53 | all covered |
+| N2b context_segments | 47 / 53 | requires phase_labels.csv; 6 missing = blind/members/no-phases |
 | N3 claim_extraction | 53 / 53 | 3 431 total claims |
-| N4 player_status | 50 / 53 | night target events + transcript name normalization added 2026-03-15; 3 missing = blind/members/empty roster |
+| N4 player_status | 50 / 53 | 3 missing = blind/members/empty roster |
+| N5 execution_context | 47 / 53 | 245 events; requires segments + roster |
+| N6 execution_episodes | 47 / 53 | 311 episodes; 97 resolved targets, 9 result confirmed |
 
 *(53 = total processable; 1 video is skip-flagged)*
 
@@ -43,8 +46,12 @@ Roster vs spreadsheet discrepancies: **115** (down from 128 pre-batch; majority 
 |-------|-------|--------|
 | `0wGTes2sqmE` | 2 unlinked speakers | Watch video; identify speakers; fix in `fix_rosters.py`; run `build_db.py` |
 | `ggM9BH__xtU` | Blind game; winner unknown; no intro roster | Watch video; set winner in `playlist.json` |
+| `DbF9CPOueTI` | Winner missing | Watch video; set winner in `playlist.json` |
+| `OaAUvM4SAkg` | Winner missing | Watch video; set winner in `playlist.json` |
 | `OPqWyO7h-wM` | 1 unlinked speaker (speaker_4, 25 segs — Duncan or Rythian) | Watch video; fix in `fix_rosters.py`; run `build_db.py` |
 | `QbzFmlScLSA` | 3 unlinked speakers (Yogs Staff game, non-regular cast) | Watch video; identify cast; fix in `fix_rosters.py`; run `build_db.py` |
+| `DzTk6kSIg-M` | 4 unlinked speakers | `streamlit run fix_rosters.py`; run `build_db.py` |
+| `IUO3Xz1kNkc` | 4 unlinked speakers | `streamlit run fix_rosters.py`; run `build_db.py` |
 | `DAb9sq5ku2k` | Bonus format; only 4/14 claims verified | Low priority; manual `roster_overrides.json` |
 | `d2M-N5iABRo`, `z79AJOPoNi4` | Members-only; no audio | Download with valid membership cookies |
 | `OYTaTtjk3ac` | **Tutorial/meta video** (skip=True); not a real game — no player roster possible, speaker linking is N/A. Diarization ran but outputs are not meaningful for game analysis. | No action needed; validate.py excludes skip=True from speaker-link checks. |
@@ -83,10 +90,5 @@ Investigated unlinked speakers in `QbzFmlScLSA`, `nPAdvl7pySg`, `OPqWyO7h-wM` (2
 
 | Branch | Purpose | State |
 |--------|---------|-------|
-| `develop` | Integration; merge features here | current working branch |
-| `feat/curation-closeout` | Curation tooling improvements | in progress |
-| `feat/nlp-enrichment` | N1/N2/N3 enrichment (merged to develop) | frozen |
-| `feat/player-normalization` | `normalize_player()` + alias expansion (merged to develop) | merged |
-| `feat/speaker-linking-and-roster-tools` | Speaker linking / roster tools (merged via PR #8) | frozen |
-| `feat/player-status-tracking` | Player death/status tracking (N4 node) | in progress |
-| `main` | Stable; PR #8 open develop→main | awaiting merge |
+| `feat/player-status-tracking` | N4–N6 enrichment nodes (player status, execution context, episodes) | **active** |
+| `main` | Stable; awaiting PR merge from feat/player-status-tracking | awaiting merge |

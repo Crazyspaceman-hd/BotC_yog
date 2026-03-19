@@ -1,7 +1,7 @@
 # BotC_yog — Pipeline DAG
 
-> **Last updated:** 2026-03-18
-> **State:** covers all scripts present on `feat/player-status-tracking` as of 2026-03-18; N0–N5 are optional enrichment nodes; player-name normalization via `normalize_player()` added to `pipeline_utils.py`
+> **Last updated:** 2026-03-19
+> **State:** covers all scripts present on `feat/player-status-tracking` as of 2026-03-19; N0–N6 are optional enrichment nodes; player-name normalization via `normalize_player()` added to `pipeline_utils.py`
 
 ---
 
@@ -16,7 +16,7 @@ The system has five layers:
 | **Curation** | `auto_assign_speakers.py`, `fix_rosters.py` | cross-video |
 | **Publish** | `build_db.py`, `generate_landing.py`, `deploy_pages.sh` | global |
 | **Validation** | `validate.py` | global, run after any phase |
-| **Enrichment** | N0–N5 optional nodes | per-video, non-blocking |
+| **Enrichment** | N0–N6 optional nodes | per-video, non-blocking |
 
 Canonical state is stored in:
 - `playlist.json` — video registry + processing status + per-game flags (committed)
@@ -94,6 +94,8 @@ E/F+overrides ──► G. video.analyze
                    ├─► [N4. content.player_status_tracking] ← optional, reads context_segments.csv (N2b), writes player_status.csv + death_events.csv + night_target_events.csv
                    |        |
                    |        └─► [N5. content.execution_context] ← optional, reads context_segments.csv (N2b), writes execution_context_events.csv
+                   |                  |
+                   |                  └─► [N6. content.execution_episodes] ← optional, reads day_events.csv (N2) + execution_context_events.csv (N5), writes execution_episodes.csv
                    |
                    v
                    J. data.build_db       (cross-video, reads all G outputs)
@@ -107,7 +109,7 @@ E/F+overrides ──► G. video.analyze
                    (any phase) ──► M. validate.end_state
 ```
 
-**N0/N1/N2/N2b/N3/N4/N5 are optional enrichment nodes.** They do not affect playlist.json status, do not block any existing step, and are not required by J (build_db). N0 writes directly to `botc.db` (frame_scan table); N1–N5 and N2b write new artifact files alongside existing outputs.
+**N0/N1/N2/N2b/N3/N4/N5/N6 are optional enrichment nodes.** They do not affect playlist.json status, do not block any existing step, and are not required by J (build_db). N0 writes directly to `botc.db` (frame_scan table); N1–N6 and N2b write new artifact files alongside existing outputs.
 
 **Notes:**
 - `F. video.scrape` can run after `A. video.download` (only needs `video.mp4`).
@@ -199,6 +201,25 @@ their night target) from leaking into public execution-pressure records. N4 capt
 private kill intent; N5 captures public execution pressure — the two are disjoint.
 Conservative policy: false negatives preferred — `_MIN_CONF = 0.60` (higher than N4's
 0.45, reflecting noisier public-day language).
+
+**Execution episodes** — produced by N6 (execution_episodes / `build_execution_episodes.py`):
+
+| Field | Description |
+|-------|-------------|
+| `likely_target_player` | Inferred from nomination_reference and public_kill_pressure signals in a ±300 s window around the vote; blank if ambiguous |
+| `execution_result_player` | From execution_result_narration after the vote window (up to +300 s); independent of inferred target |
+| `nomination_speakers` | Players who made nomination_reference events in the episode window |
+| `pressure_speakers` | Players who applied public_kill_pressure in the episode window |
+| `opposition_speakers` | Players who defended the target against execution |
+| `confidence` | Aggregated from VoteSequence confidence + nomination/pressure/result evidence |
+
+N6 produces one row per Day-phase VoteSequence event, aggregating N5 public signals
+and N2 vote windows into a single inspectable artifact per execution episode.
+`likely_target_player` and `execution_result_player` are stored separately:
+one is inferred from pre-vote town discussion, the other confirmed from result narration.
+These can differ (town pushes player A but executes player B via a different nomination),
+which is meaningful game data. Conservative: target is left blank when evidence is
+ambiguous (competing candidates within _AMBIGUITY_RATIO=1.4 and _AMBIGUITY_GAP=0.20).
 
 ---
 
@@ -485,6 +506,7 @@ bash scripts/run_all.sh
 | Night target events (N4) | `outputs/<id>/night_target_events.csv` | No (gitignored) | Via N4 (`extract_player_status.py`) |
 | Context segments (N2b) | `outputs/<id>/context_segments.csv` | No (gitignored) | Via N2b (`generate_context_segments.py`) |
 | Execution context events (N5) | `outputs/<id>/execution_context_events.csv` | No (gitignored) | Via N5 (`extract_execution_context.py`) |
+| Execution episodes (N6) | `outputs/<id>/execution_episodes.csv` | No (gitignored) | Via N6 (`build_execution_episodes.py`) |
 | Landing page HTML | `landing.html` | No (gitignored) | Via step L |
 | Live landing page | `gh-pages:index.html` | Yes (separate branch) | Via `deploy_pages.sh` |
 
@@ -604,6 +626,23 @@ bash scripts/run_all.sh
 
 ---
 
+## N6. content.execution_episodes  [optional enrichment]
+
+| Field | Value |
+|-------|-------|
+| **Purpose** | Aggregate N2 VoteSequence windows and N5 execution-context events into one row per execution episode; describe likely target, who drove the conversation, and whether result narration confirms the executed player |
+| **Script** | `build_execution_episodes.py` |
+| **Per-video?** | Yes |
+| **Slot** | After N5 (execution context) — reads `execution_context_events.csv` + `day_events.csv` |
+| **Inputs** | `day_events.csv` (N2, required), `execution_context_events.csv` (N5, optional), `phase_labels.csv` (N2, optional — used for Night-phase filtering), `intro_roster.json`, `roster_overrides.json` (optional) |
+| **Outputs** | `outputs/<id>/execution_episodes.csv` — one row per Day-phase VoteSequence event (columns: timestamp_start, timestamp_end, phase, round, vote_window_start, vote_window_end, likely_target_player, likely_target_role_if_any, evidence_count, supporting_event_types, confidence, nomination_speakers, pressure_speakers, opposition_speakers, execution_result_player, matched_vote_sequence, source_timestamps) |
+| **Command** | `python build_execution_episodes.py <video_id>` \| `python build_execution_episodes.py --all` |
+| **Acceptance** | `execution_episodes.csv` exists; one row per Day-phase VoteSequence; `likely_target_player` blank when evidence is ambiguous or absent; `execution_result_player` independent of inferred target |
+| **Downstream** | Future vote-reconstruction, execution-strategy analysis, claimed-role-at-execution dataset |
+| **Notes** | **Conservative scoring:** candidate target scored from pre-vote N5 events using weighted sum (`nomination × 1.0`, `kill_pressure × 0.7`, `opposition × 0.3`). Target resolved only if top candidate exceeds second by ratio ≥ 1.4 AND gap ≥ 0.20 — otherwise `likely_target_player = ""`. **Night-phase filtering:** VoteSequences where both start and end fall in Night are excluded (frame-scan misdetections); VoteSequences that straddle Night→Day boundaries are included if either endpoint falls in Day. **Lookback:** 300 s before vote window start for nomination/pressure evidence. **Result lookahead:** 300 s after vote window end for execution_result_narration confirmation. `likely_target_player` and `execution_result_player` are stored separately — they can differ (town discusses one target but executes another via a different nomination); this divergence is real game signal. Episodes with zero N5 evidence are still emitted (conf ≈ 0.40) so vote coverage is always visible. **Batch results (47 videos):** 311 episodes — resolved targets: 97/311 (31%); result confirmed: 9/311; confirmed matches (target == result): 1/311. |
+
+---
+
 ## Scripts Not in the DAG (Support / Utility)
 
 | Script | Role |
@@ -622,6 +661,7 @@ bash scripts/run_all.sh
 | `extract_claims.py` | N3 optional enrichment: role-claim / accusation / suspicion extraction |
 | `extract_player_status.py` | N4 optional enrichment: player death / status tracking |
 | `extract_execution_context.py` | N5 optional enrichment: public execution-context event extraction → `execution_context_events.csv` |
+| `build_execution_episodes.py` | N6 optional enrichment: execution-episode aggregation from N2 vote windows + N5 events → `execution_episodes.csv` |
 
 ---
 
