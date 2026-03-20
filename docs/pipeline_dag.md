@@ -1,7 +1,7 @@
 # BotC_yog — Pipeline DAG
 
 > **Last updated:** 2026-03-19
-> **State:** covers all scripts present on `feat/player-status-tracking` as of 2026-03-19; N0–N7 are optional enrichment nodes; player-name normalization via `normalize_player()` added to `pipeline_utils.py`
+> **State:** covers all scripts present on `feat/player-status-tracking` as of 2026-03-19; N0–N8 are optional enrichment nodes; player-name normalization via `normalize_player()` added to `pipeline_utils.py`
 
 ---
 
@@ -16,7 +16,7 @@ The system has five layers:
 | **Curation** | `auto_assign_speakers.py`, `fix_rosters.py` | cross-video |
 | **Publish** | `build_db.py`, `generate_landing.py`, `deploy_pages.sh` | global |
 | **Validation** | `validate.py` | global, run after any phase |
-| **Enrichment** | N0–N7 optional nodes | per-video, non-blocking |
+| **Enrichment** | N0–N8 optional nodes | per-video, non-blocking |
 
 Canonical state is stored in:
 - `playlist.json` — video registry + processing status + per-game flags (committed)
@@ -98,6 +98,8 @@ E/F+overrides ──► G. video.analyze
                    |                  └─► [N6. content.execution_episodes] ← optional, reads day_events.csv (N2) + execution_context_events.csv (N5), writes execution_episodes.csv
                    |                             |
                    |                             └─► [N7. content.execution_claim_context] ← optional, reads execution_episodes.csv (N6) + claims.csv (N3), writes execution_claim_context.csv
+                   |                                        |
+                   |                                        └─► [N8. content.claimed_role_outcomes] ← optional, reads execution_claim_context.csv (N7) + death_events.csv (N4) + claims.csv (N3), writes claimed_role_outcomes.csv
                    |
                    v
                    J. data.build_db       (cross-video, reads all G outputs)
@@ -111,7 +113,7 @@ E/F+overrides ──► G. video.analyze
                    (any phase) ──► M. validate.end_state
 ```
 
-**N0/N1/N2/N2b/N3/N4/N5/N6/N7 are optional enrichment nodes.** They do not affect playlist.json status, do not block any existing step, and are not required by J (build_db). N0 writes directly to `botc.db` (frame_scan table); N1–N7 and N2b write new artifact files alongside existing outputs.
+**N0/N1/N2/N2b/N3/N4/N5/N6/N7/N8 are optional enrichment nodes.** They do not affect playlist.json status, do not block any existing step, and are not required by J (build_db). N0 writes directly to `botc.db` (frame_scan table); N1–N8 and N2b write new artifact files alongside existing outputs.
 
 **Notes:**
 - `F. video.scrape` can run after `A. video.download` (only needs `video.mp4`).
@@ -243,6 +245,29 @@ Claim selection policy: most recent role_claim with confidence ≥ 0.35 before v
 sorted by confidence DESC → intro-phase tier → recency DESC. If no qualifying claim exists,
 all claim fields are left blank (false negative preferred over forced guess).
 target and result player claims are resolved independently.
+
+**Claimed-role outcomes** — produced by N8 (claimed_role_outcomes / `build_claimed_role_outcomes.py`):
+
+One row per player per video. Fields:
+
+| Field | Description |
+|-------|-------------|
+| `actual_role` / `alignment` | From intro_roster + roster_overrides; alignment via `botc_ui._team()` |
+| `winner` | Game outcome from `playlist.json` |
+| `survived` / `died` / `was_executed` | Derived from N4 death_events (absence = survived conservative) |
+| `death_type` / `death_timestamp` | From N4 (execution / night_death / uncertain_death) |
+| `first_claimed_role` / `last_claimed_role` | Earliest and highest-confidence N3 role claim (conf ≥ 0.35) |
+| `last_claim_confidence` / `last_claim_stale` | Confidence and staleness of last claim (stale if > 5400 s before death or game end) |
+| `claim_count` / `lied_about_role` | Total qualifying claims; any verified_lie in N3 |
+| `claimed_role_at_pressure` | From N7 target fields when player was likely_target_player |
+| `claimed_role_at_execution` | From N7 result fields when player was execution_result_player |
+| `target_claim_match_status` / `result_claim_match_status` | `lie`, `truthful`, or `unverified` |
+| `pressure_episode_count` / `targeted_in_n6` | N6 episodes where player was likely_target |
+| `execution_episode_count` / `executed_in_n6` | N6 episodes where player was execution_result |
+
+N8 is a pure aggregation layer: it joins N3, N4, N6, and N7 into one analysis-ready table per player per game.
+No new extraction is performed. Claims are not forced when evidence is absent.
+`pressure_episode_count` and `execution_episode_count` are kept separate — they represent distinct concepts (town discussion vs confirmed execution).
 
 ---
 
@@ -531,6 +556,7 @@ bash scripts/run_all.sh
 | Execution context events (N5) | `outputs/<id>/execution_context_events.csv` | No (gitignored) | Via N5 (`extract_execution_context.py`) |
 | Execution episodes (N6) | `outputs/<id>/execution_episodes.csv` | No (gitignored) | Via N6 (`build_execution_episodes.py`) |
 | Execution claim context (N7) | `outputs/<id>/execution_claim_context.csv` | No (gitignored) | Via N7 (`build_execution_claim_context.py`) |
+| Claimed role outcomes (N8) | `outputs/<id>/claimed_role_outcomes.csv` | No (gitignored) | Via N8 (`build_claimed_role_outcomes.py`) |
 | Landing page HTML | `landing.html` | No (gitignored) | Via step L |
 | Live landing page | `gh-pages:index.html` | Yes (separate branch) | Via `deploy_pages.sh` |
 
@@ -683,6 +709,22 @@ bash scripts/run_all.sh
 
 ---
 
+## N8. content.claimed_role_outcomes  [optional enrichment]
+
+| Field | Value |
+|-------|-------|
+| **Purpose** | One row per player per video — analysis-ready summary of claimed role, actual role, survival, execution, and pressure outcomes. Directly answers charter questions: go-to claimed role to die/survive, which claimed roles attract execution pressure, claimed vs actual role comparison. |
+| **Script** | `build_claimed_role_outcomes.py` |
+| **Per-video?** | Yes |
+| **Slot** | After N4, N6, N7 — reads `death_events.csv` + `claims.csv` + `execution_episodes.csv` + `execution_claim_context.csv` |
+| **Inputs** | `execution_claim_context.csv` (N7, optional), `execution_episodes.csv` (N6, optional), `claims.csv` (N3, optional), `death_events.csv` (N4, optional), `intro_roster.json` + `roster_overrides.json` (required for roster), `playlist.json` (winner + duration) |
+| **Outputs** | `outputs/<id>/claimed_role_outcomes.csv` — one row per player (see Game Phases section above for full field list) |
+| **Command** | `python build_claimed_role_outcomes.py <video_id>` \| `python build_claimed_role_outcomes.py --all` |
+| **Acceptance** | `claimed_role_outcomes.csv` exists with one row per player; blank claim fields when no qualifying claim found; `was_executed` and `targeted_in_n6` fields are independent; alignment via `botc_ui._team()` only |
+| **Notes** | **Claim selection:** `last_claimed_role` = highest-confidence role_claim (conf ≥ 0.35), tie-break most recent. `first_claimed_role` = earliest qualifying claim. `claimed_role_at_pressure` and `claimed_role_at_execution` are sourced from N7 — if N7 left them blank, they stay blank here. **Staleness:** `last_claim_stale = "true"` if the last claim was made more than 5400 s before the player's death (or game end if they survived). **Alignment:** always via `botc_ui._team()` — never hardcoded. **Conservative:** blanks preferred over forced guesses; `lied_about_role` only set when N3 explicitly marks `verified_lie=true`. **Batch results (47 videos):** 340 player rows; liars flagged across 30+ videos; pressure and execution counts populated from N6 for all videos with execution_episodes.csv. |
+
+---
+
 ## Scripts Not in the DAG (Support / Utility)
 
 | Script | Role |
@@ -703,6 +745,7 @@ bash scripts/run_all.sh
 | `extract_execution_context.py` | N5 optional enrichment: public execution-context event extraction → `execution_context_events.csv` |
 | `build_execution_episodes.py` | N6 optional enrichment: execution-episode aggregation from N2 vote windows + N5 events → `execution_episodes.csv` |
 | `build_execution_claim_context.py` | N7 optional enrichment: claimed-role-at-execution join from N6 episodes + N3 claims → `execution_claim_context.csv` |
+| `build_claimed_role_outcomes.py` | N8 optional enrichment: analysis-ready claimed-role outcomes (one row per player per video) → `claimed_role_outcomes.csv` |
 
 ---
 

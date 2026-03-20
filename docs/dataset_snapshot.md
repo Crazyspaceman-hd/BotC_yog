@@ -1,6 +1,6 @@
 # Dataset Snapshot
 
-> **Last updated:** 2026-03-19 (feat/player-status-tracking: N5 execution context, N6 execution episodes, N7 execution claim context)
+> **Last updated:** 2026-03-19 (feat/player-status-tracking: N5–N8 enrichment nodes; N8 = claimed-role outcomes analysis layer)
 > Run `python validate.py` for the current end-state check.
 
 ---
@@ -23,7 +23,7 @@ Roster vs spreadsheet discrepancies: **115** (down from 128 pre-batch; majority 
 
 ---
 
-## Enrichment coverage (N0/N1/N2/N2b/N3/N4/N5/N6/N7)
+## Enrichment coverage (N0/N1/N2/N2b/N3/N4/N5/N6/N7/N8)
 
 | Enrichment | Coverage | Notes |
 |------------|----------|-------|
@@ -36,6 +36,7 @@ Roster vs spreadsheet discrepancies: **115** (down from 128 pre-batch; majority 
 | N5 execution_context | 47 / 53 | 245 events; requires segments + roster |
 | N6 execution_episodes | 47 / 53 | 311 episodes; 97 resolved targets, 9 result confirmed |
 | N7 execution_claim_context | 47 / 53 | 311 episodes; target_claim resolved: 52/311 (17%); result_claim resolved: 3/311; lies flagged: 17 episodes |
+| N8 claimed_role_outcomes | 46 / 53 | 340 player rows; one per player per game; pressure/execution/claim/death all joined |
 
 *(53 = total processable; 1 video is skip-flagged)*
 
@@ -91,5 +92,5 @@ Investigated unlinked speakers in `QbzFmlScLSA`, `nPAdvl7pySg`, `OPqWyO7h-wM` (2
 
 | Branch | Purpose | State |
 |--------|---------|-------|
-| `feat/player-status-tracking` | N4–N6 enrichment nodes (player status, execution context, episodes) | **active** |
+| `feat/player-status-tracking` | N4–N8 enrichment nodes (player status, execution context, episodes, claim context, outcomes) | **active** |
 | `main` | Stable; awaiting PR merge from feat/player-status-tracking | awaiting merge |
