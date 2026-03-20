@@ -129,15 +129,15 @@ def _load_day_events(out_dir: Path) -> list[dict]:
         return list(csv.DictReader(fh))
 
 
-def _load_n5_events(out_dir: Path) -> list[dict]:
-    """Load execution_context_events.csv, sorted ascending by timestamp."""
+def _load_execution_context_events(out_dir: Path) -> list[dict]:
+    """Load execution_context_events.csv (N5 output), sorted ascending by timestamp."""
     p = out_dir / "execution_context_events.csv"
     if not p.exists():
         return []
     with p.open(encoding="utf-8", newline="") as fh:
-        rows = list(csv.DictReader(fh))
-    rows.sort(key=lambda r: float(r.get("timestamp_start", 0)))
-    return rows
+        event_rows = list(csv.DictReader(fh))
+    event_rows.sort(key=lambda r: float(r.get("timestamp_start", 0)))
+    return event_rows
 
 
 def _load_phase_labels(out_dir: Path) -> list[dict]:
@@ -166,10 +166,10 @@ def _load_roster(out_dir: Path, aliases: dict) -> dict[str, str]:
     if overrides.exists():
         try:
             ov = json.loads(overrides.read_text(encoding="utf-8"))
-            for spk, info in ov.items():
-                raw = info.get("name", "").strip()
-                role = info.get("actual_role", "").strip()
-                if raw and raw.lower() not in ("storyteller", spk.lower()):
+            for speaker_id, player_info in ov.items():
+                raw = player_info.get("name", "").strip()
+                role = player_info.get("actual_role", "").strip()
+                if raw and raw.lower() not in ("storyteller", speaker_id.lower()):
                     roster.setdefault(resolve_player_name(raw, aliases), role)
         except Exception:
             pass
@@ -196,23 +196,23 @@ def _phase_at(t: float, labels: list[dict]) -> str:
 # ── Candidate scoring ──────────────────────────────────────────────────────────
 
 
-def _score_candidates(events: list[dict]) -> dict[str, float]:
-    """Accumulate weighted scores per target player from N5 events."""
-    scores: dict[str, float] = defaultdict(float)
-    for evt in events:
-        target = evt.get("target_player", "").strip()
+def _score_candidates(pre_vote_context_events: list[dict]) -> dict[str, float]:
+    """Accumulate weighted scores per target player from pre-vote execution context events."""
+    candidate_scores: dict[str, float] = defaultdict(float)
+    for context_event in pre_vote_context_events:
+        target = context_event.get("target_player", "").strip()
         if not target:
             continue
-        etype = evt.get("event_type", "")
-        conf = float(evt.get("confidence", 0.0))
-        if etype == "nomination_reference":
-            scores[target] += conf * _NOMINATION_WEIGHT
-        elif etype == "public_kill_pressure":
-            scores[target] += conf * _KILL_PRESSURE_WEIGHT
-        elif etype == "execution_opposition":
+        event_type = context_event.get("event_type", "")
+        event_conf = float(context_event.get("confidence", 0.0))
+        if event_type == "nomination_reference":
+            candidate_scores[target] += event_conf * _NOMINATION_WEIGHT
+        elif event_type == "public_kill_pressure":
+            candidate_scores[target] += event_conf * _KILL_PRESSURE_WEIGHT
+        elif event_type == "execution_opposition":
             # Opposition is evidence the person is being discussed, not strong target signal.
-            scores[target] += conf * _OPPOSITION_WEIGHT
-    return dict(scores)
+            candidate_scores[target] += event_conf * _OPPOSITION_WEIGHT
+    return dict(candidate_scores)
 
 
 def _resolve_target(scores: dict[str, float]) -> str:
@@ -289,7 +289,7 @@ def extract(video_id: str, force: bool = False) -> bool:
         print(f"  SKIP {video_id}: no day_events.csv")
         return False
 
-    n5_events = _load_n5_events(out_dir)
+    execution_context_events = _load_execution_context_events(out_dir)
     phase_labels = _load_phase_labels(out_dir)
     roster = _load_roster(out_dir, aliases)
 
@@ -325,151 +325,153 @@ def extract(video_id: str, force: bool = False) -> bool:
 
     print(
         f"  VoteSequences (Day): {len(day_vote_seqs)}"
-        f"  |  N5 events: {len(n5_events)}"
+        f"  |  Execution context events: {len(execution_context_events)}"
         f"  |  Roster players: {len(roster)}"
     )
 
-    episodes: list[dict] = []
+    execution_episode_rows: list[dict] = []
 
-    for vs in day_vote_seqs:
-        vs_start = float(vs["start"])
-        vs_end = float(vs["end"])
-        round_num = vs.get("round", "")
-        vs_conf = float(vs.get("confidence", 1.0))
+    for vote_sequence in day_vote_seqs:
+        vs_start = float(vote_sequence["start"])
+        vs_end = float(vote_sequence["end"])
+        round_num = vote_sequence.get("round", "")
+        vote_sequence_conf = float(vote_sequence.get("confidence", 1.0))
 
         # Gather window bounds.
-        gather_pre_start = vs_start - _LOOKBACK_S
-        gather_result_end = vs_end + _RESULT_LOOKAHEAD_S
+        pre_vote_window_start = vs_start - _LOOKBACK_S
+        result_window_end = vs_end + _RESULT_LOOKAHEAD_S
 
-        # Split N5 events:
-        #   pre_vote_events  — nomination / kill-pressure / opposition in lookback window
-        #   result_events    — result narration from vote_start onwards
-        pre_vote_events: list[dict] = []
-        result_events: list[dict] = []
+        # Partition execution context events into two groups:
+        #   pre_vote_context_events  — nomination / kill-pressure / opposition in lookback window
+        #   result_narration_events  — result narration from vote_start onwards
+        pre_vote_context_events: list[dict] = []
+        result_narration_events: list[dict] = []
 
-        for evt in n5_events:
-            t = float(evt.get("timestamp_start", 0))
-            etype = evt.get("event_type", "")
-            if etype == "execution_result_narration":
+        for context_event in execution_context_events:
+            event_time_s = float(context_event.get("timestamp_start", 0))
+            event_type = context_event.get("event_type", "")
+            if event_type == "execution_result_narration":
                 # Accept result narration from vote_start through result lookahead.
-                if vs_start <= t <= gather_result_end:
-                    result_events.append(evt)
+                if vs_start <= event_time_s <= result_window_end:
+                    result_narration_events.append(context_event)
             else:
                 # Accept nomination / pressure / opposition within lookback + vote window.
-                if gather_pre_start <= t <= vs_end:
-                    pre_vote_events.append(evt)
+                if pre_vote_window_start <= event_time_s <= vs_end:
+                    pre_vote_context_events.append(context_event)
 
-        all_contributing = pre_vote_events + result_events
+        all_contributing_events = pre_vote_context_events + result_narration_events
 
         # Score candidates and resolve likely target.
-        scores = _score_candidates(pre_vote_events)
-        likely_target = _resolve_target(scores)
+        candidate_scores = _score_candidates(pre_vote_context_events)
+        likely_target = _resolve_target(candidate_scores)
 
         # Best result narration: prefer post-vote events (execution ceremony after vote).
         # Fall back to within-vote result narration (ST announces during the vote itself).
-        post_vote_results = [
-            e for e in result_events if float(e["timestamp_start"]) > vs_end
+        post_vote_result_events = [
+            e for e in result_narration_events if float(e["timestamp_start"]) > vs_end
         ]
-        in_vote_results = [
-            e for e in result_events if float(e["timestamp_start"]) <= vs_end
+        in_vote_result_events = [
+            e for e in result_narration_events if float(e["timestamp_start"]) <= vs_end
         ]
-        candidate_results = post_vote_results if post_vote_results else in_vote_results
-        result_player = ""
-        if candidate_results:
-            best_result = max(candidate_results, key=lambda e: float(e.get("confidence", 0)))
-            result_player = best_result.get("target_player", "")
+        candidate_result_events = post_vote_result_events if post_vote_result_events else in_vote_result_events
+        execution_result_player = ""
+        if candidate_result_events:
+            best_result_narration = max(candidate_result_events, key=lambda e: float(e.get("confidence", 0)))
+            execution_result_player = best_result_narration.get("target_player", "")
 
         # Episode temporal bounds: expand to cover earliest/latest contributing event.
-        if all_contributing:
-            earliest_t = min(float(e["timestamp_start"]) for e in all_contributing)
-            latest_t = max(float(e["timestamp_start"]) for e in all_contributing)
-            ep_start = min(vs_start, earliest_t)
-            ep_end = max(vs_end, latest_t)
+        if all_contributing_events:
+            earliest_event_t = min(float(e["timestamp_start"]) for e in all_contributing_events)
+            latest_event_t = max(float(e["timestamp_start"]) for e in all_contributing_events)
+            episode_start = min(vs_start, earliest_event_t)
+            episode_end = max(vs_end, latest_event_t)
         else:
-            ep_start = vs_start
-            ep_end = vs_end
+            episode_start = vs_start
+            episode_end = vs_end
 
         # Compute confidence.
-        conf = _compute_episode_confidence(vs_conf, pre_vote_events, result_player, likely_target)
-        if conf < _MIN_EPISODE_CONF:
+        episode_conf = _compute_episode_confidence(
+            vote_sequence_conf, pre_vote_context_events, execution_result_player, likely_target
+        )
+        if episode_conf < _MIN_EPISODE_CONF:
             continue
 
-        # Build per-type speaker lists from pre-vote events.
-        nom_spk: set[str] = set()
-        prs_spk: set[str] = set()
-        opp_spk: set[str] = set()
-        for evt in pre_vote_events:
-            src = (evt.get("source_player_name") or evt.get("speaker", "")).strip()
-            etype = evt.get("event_type", "")
-            if etype == "nomination_reference" and src:
-                nom_spk.add(src)
-            elif etype == "public_kill_pressure" and src:
-                prs_spk.add(src)
-            elif etype == "execution_opposition" and src:
-                opp_spk.add(src)
+        # Build per-type speaker sets from pre-vote events.
+        nomination_speakers: set[str] = set()
+        pressure_speakers: set[str] = set()
+        opposition_speakers: set[str] = set()
+        for context_event in pre_vote_context_events:
+            speaker_name = (context_event.get("source_player_name") or context_event.get("speaker", "")).strip()
+            event_type = context_event.get("event_type", "")
+            if event_type == "nomination_reference" and speaker_name:
+                nomination_speakers.add(speaker_name)
+            elif event_type == "public_kill_pressure" and speaker_name:
+                pressure_speakers.add(speaker_name)
+            elif event_type == "execution_opposition" and speaker_name:
+                opposition_speakers.add(speaker_name)
 
-        event_types_seen = sorted(set(e["event_type"] for e in pre_vote_events))
+        event_types_seen = sorted(set(e["event_type"] for e in pre_vote_context_events))
 
-        # source_timestamps: all contributing events sorted.
-        src_ts = sorted(
-            set(str(round(float(e["timestamp_start"]), 2)) for e in all_contributing)
+        # contributing_timestamps: all contributing events sorted.
+        contributing_timestamps = sorted(
+            set(str(round(float(e["timestamp_start"]), 2)) for e in all_contributing_events)
         )
 
-        episodes.append({
-            "timestamp_start": round(ep_start, 3),
-            "timestamp_end": round(ep_end, 3),
+        execution_episode_rows.append({
+            "timestamp_start": round(episode_start, 3),
+            "timestamp_end": round(episode_end, 3),
             "phase": "Day",
             "round": round_num,
             "vote_window_start": round(vs_start, 3),
             "vote_window_end": round(vs_end, 3),
             "likely_target_player": likely_target,
             "likely_target_role_if_any": roster.get(likely_target, "") if likely_target else "",
-            "evidence_count": len(pre_vote_events),
+            "evidence_count": len(pre_vote_context_events),
             "supporting_event_types": "|".join(event_types_seen),
-            "confidence": conf,
-            "nomination_speakers": "|".join(sorted(nom_spk)),
-            "pressure_speakers": "|".join(sorted(prs_spk)),
-            "opposition_speakers": "|".join(sorted(opp_spk)),
-            "execution_result_player": result_player,
+            "confidence": episode_conf,
+            "nomination_speakers": "|".join(sorted(nomination_speakers)),
+            "pressure_speakers": "|".join(sorted(pressure_speakers)),
+            "opposition_speakers": "|".join(sorted(opposition_speakers)),
+            "execution_result_player": execution_result_player,
             "matched_vote_sequence": "true",
-            "source_timestamps": "|".join(src_ts),
+            "source_timestamps": "|".join(contributing_timestamps),
         })
 
     # Sort by vote window.
-    episodes.sort(key=lambda e: e["vote_window_start"])
+    execution_episode_rows.sort(key=lambda episode: episode["vote_window_start"])
 
     # Write output — always, even if empty, so downstream can detect N6 coverage.
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=_FIELDNAMES)
         writer.writeheader()
-        writer.writerows(episodes)
+        writer.writerows(execution_episode_rows)
 
     # Summary.
-    resolved = sum(1 for e in episodes if e["likely_target_player"])
-    result_confirmed = sum(1 for e in episodes if e["execution_result_player"])
-    confirmed_match = sum(
-        1 for e in episodes
-        if e["likely_target_player"]
-        and e["execution_result_player"]
-        and e["likely_target_player"].lower() == e["execution_result_player"].lower()
+    resolved_count = sum(1 for ep in execution_episode_rows if ep["likely_target_player"])
+    result_confirmed_count = sum(1 for ep in execution_episode_rows if ep["execution_result_player"])
+    confirmed_match_count = sum(
+        1 for ep in execution_episode_rows
+        if ep["likely_target_player"]
+        and ep["execution_result_player"]
+        and ep["likely_target_player"].lower() == ep["execution_result_player"].lower()
     )
-    print(f"  Wrote {len(episodes)} episodes -> {out_path.name}")
-    print(f"    Resolved targets: {resolved}/{len(episodes)}")
-    print(f"    Result confirmed: {result_confirmed}/{len(episodes)}")
-    if confirmed_match:
-        print(f"    Confirmed matches (target == result): {confirmed_match}")
+    print(f"  Wrote {len(execution_episode_rows)} episodes -> {out_path.name}")
+    print(f"    Resolved targets: {resolved_count}/{len(execution_episode_rows)}")
+    print(f"    Result confirmed: {result_confirmed_count}/{len(execution_episode_rows)}")
+    if confirmed_match_count:
+        print(f"    Confirmed matches (target == result): {confirmed_match_count}")
 
-    if episodes:
+    if execution_episode_rows:
         print("  Episodes:")
-        for ep in episodes:
-            tgt = ep["likely_target_player"] or "(unresolved)"
-            res = ep["execution_result_player"] or "(no result)"
+        for episode in execution_episode_rows:
+            target_display = episode["likely_target_player"] or "(unresolved)"
+            result_display = episode["execution_result_player"] or "(no result)"
             print(
-                f"    round={ep['round']}  "
-                f"vote={ep['vote_window_start']:.0f}-{ep['vote_window_end']:.0f}s  "
-                f"target={tgt}  result={res}  "
-                f"evid={ep['evidence_count']}  conf={ep['confidence']}"
+                f"    round={episode['round']}  "
+                f"vote={episode['vote_window_start']:.0f}-{episode['vote_window_end']:.0f}s  "
+                f"target={target_display}  result={result_display}  "
+                f"evid={episode['evidence_count']}  conf={episode['confidence']}"
             )
 
     return True
