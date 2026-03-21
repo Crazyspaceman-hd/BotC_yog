@@ -115,16 +115,16 @@ def _load_roster(out_dir: Path, aliases: dict) -> dict[str, tuple[str, str]]:
     if intro.exists():
         try:
             data = json.loads(intro.read_text(encoding="utf-8"))
-            for p in data.get("players", []):
-                raw_name = p.get("name", "").strip()
-                role_raw = p.get("actual_role", "").strip()
+            for player_entry in data.get("players", []):
+                raw_name = player_entry.get("name", "").strip()
+                role_raw = player_entry.get("actual_role", "").strip()
                 if not raw_name:
                     continue
                 if raw_name.lower() in _STORYTELLER_NAMES:
                     continue
-                display = resolve_player_name(raw_name, aliases)
-                norm = normalize_player(display)
-                roster[norm] = (display, role_raw)
+                display_name = resolve_player_name(raw_name, aliases)
+                player_key = normalize_player(display_name)
+                roster[player_key] = (display_name, role_raw)
         except Exception:
             pass
 
@@ -132,18 +132,18 @@ def _load_roster(out_dir: Path, aliases: dict) -> dict[str, tuple[str, str]]:
     if overrides.exists():
         try:
             ov = json.loads(overrides.read_text(encoding="utf-8"))
-            for spk, info in ov.items():
-                raw_name = info.get("name", "").strip()
-                role_raw = info.get("actual_role", "").strip()
+            for speaker_id, player_info in ov.items():
+                raw_name = player_info.get("name", "").strip()
+                role_raw = player_info.get("actual_role", "").strip()
                 if not raw_name:
                     continue
                 if raw_name.lower() in _STORYTELLER_NAMES:
                     continue
-                if raw_name.lower() == spk.lower():
+                if raw_name.lower() == speaker_id.lower():
                     continue  # unresolved speaker placeholder
-                display = resolve_player_name(raw_name, aliases)
-                norm = normalize_player(display)
-                roster.setdefault(norm, (display, role_raw))
+                display_name = resolve_player_name(raw_name, aliases)
+                player_key = normalize_player(display_name)
+                roster.setdefault(player_key, (display_name, role_raw))
         except Exception:
             pass
 
@@ -159,8 +159,12 @@ def _read_csv(path: Path) -> list[dict]:
         return list(csv.DictReader(fh))
 
 
-def _norm_name(name: str, aliases: dict) -> str:
-    """Normalize a player name to a stable lookup key."""
+def player_key_from_name(name: str, aliases: dict) -> str:
+    """Normalize a player name to a stable, case-insensitive lookup key.
+
+    Combines alias resolution and separator-collapsed lowercasing so that
+    'Lewis Brindley', 'lewis brindley', and 'lewisbrindley' all map to the same key.
+    """
     return normalize_player(resolve_player_name(name.strip(), aliases))
 
 
@@ -186,7 +190,7 @@ def _display_claimed(raw: str) -> str:
 
 # ── Per-video processing ──────────────────────────────────────────────────────
 
-def _process_video(
+def build_outcome_rows_for_video(
     video_id: str,
     out_dir: Path,
     winner: str,
@@ -200,218 +204,223 @@ def _process_video(
     if not roster:
         return []
 
-    # 2. Death events → {norm_name: row}
-    death_by_player: dict[str, dict] = {}
-    for row in _read_csv(out_dir / "death_events.csv"):
-        name = row.get("player_name", "").strip()
+    # 2. Death events → {player_key: death_event_row}  (earliest death only per player)
+    earliest_death_by_player: dict[str, dict] = {}
+    for death_event_row in _read_csv(out_dir / "death_events.csv"):
+        name = death_event_row.get("player_name", "").strip()
         if not name:
             continue
-        norm = _norm_name(name, aliases)
-        if norm not in death_by_player:           # keep earliest death only
-            death_by_player[norm] = row
+        player_key = player_key_from_name(name, aliases)
+        if player_key not in earliest_death_by_player:
+            earliest_death_by_player[player_key] = death_event_row
 
-    # 3. Role claims → {norm_name: [sorted rows]}
+    # 3. Role claims → {player_key: [claim_rows sorted by timestamp ascending]}
     # Keep only role_claim events with conf >= threshold and a non-blank claimed_role.
     claims_by_player: dict[str, list[dict]] = defaultdict(list)
-    for row in _read_csv(out_dir / "claims.csv"):
-        if row.get("event_type") != "role_claim":
+    for claim_row in _read_csv(out_dir / "claims.csv"):
+        if claim_row.get("event_type") != "role_claim":
             continue
-        if not row.get("claimed_role", "").strip():
+        if not claim_row.get("claimed_role", "").strip():
             continue
         try:
-            conf = float(row.get("confidence", 0))
+            claim_conf = float(claim_row.get("confidence", 0))
         except ValueError:
-            conf = 0.0
-        if conf < _CLAIM_MIN_CONF:
+            claim_conf = 0.0
+        if claim_conf < _CLAIM_MIN_CONF:
             continue
-        name = row.get("player_name", "").strip()
+        name = claim_row.get("player_name", "").strip()
         if not name:
             continue
-        norm = _norm_name(name, aliases)
-        row["_ts"] = _ts_to_seconds(row.get("timestamp_start", "0"))
-        row["_conf"] = conf
-        claims_by_player[norm].append(row)
+        player_key = player_key_from_name(name, aliases)
+        claim_row["_ts"] = _ts_to_seconds(claim_row.get("timestamp_start", "0"))
+        claim_row["_conf"] = claim_conf
+        claims_by_player[player_key].append(claim_row)
 
     # Sort each player's claims by timestamp ascending
-    for norm in claims_by_player:
-        claims_by_player[norm].sort(key=lambda r: r["_ts"])
+    for player_key in claims_by_player:
+        claims_by_player[player_key].sort(key=lambda claim_row: claim_row["_ts"])
 
-    # 4. N6 episode counts → per-player pressure / execution count
-    pressure_count: dict[str, int] = defaultdict(int)
-    execution_count: dict[str, int] = defaultdict(int)
-    for row in _read_csv(out_dir / "execution_episodes.csv"):
-        target = row.get("likely_target_player", "").strip()
-        result = row.get("execution_result_player", "").strip()
-        if target:
-            pressure_count[_norm_name(target, aliases)] += 1
-        if result:
-            execution_count[_norm_name(result, aliases)] += 1
+    # 4. N6 episode counts → per-player pressure / execution episode counts
+    pressure_episode_count_by_player: dict[str, int] = defaultdict(int)
+    execution_episode_count_by_player: dict[str, int] = defaultdict(int)
+    for episode_row in _read_csv(out_dir / "execution_episodes.csv"):
+        target_name = episode_row.get("likely_target_player", "").strip()
+        result_name = episode_row.get("execution_result_player", "").strip()
+        if target_name:
+            pressure_episode_count_by_player[player_key_from_name(target_name, aliases)] += 1
+        if result_name:
+            execution_episode_count_by_player[player_key_from_name(result_name, aliases)] += 1
 
-    # 5. N7 claim-at-key-moment → per-player best claim row
+    # 5. N7 claim-at-key-moment → per-player best claim context row
     #    claimed_role_at_pressure: when player was likely_target_player.
     #      Pick the N7 row with highest target_claim_confidence; tie: most recent vote.
     #    claimed_role_at_execution: when player was execution_result_player.
     #      Take first non-blank (typically only one per player).
-    pressure_claim: dict[str, dict] = {}   # norm -> best N7 row (target side)
-    execution_claim: dict[str, dict] = {}  # norm -> best N7 row (result side)
+    best_pressure_claim_by_player: dict[str, dict] = {}   # player_key -> best N7 target-side row
+    best_execution_claim_by_player: dict[str, dict] = {}  # player_key -> best N7 result-side row
 
-    for row in _read_csv(out_dir / "execution_claim_context.csv"):
-        target = row.get("likely_target_player", "").strip()
-        result = row.get("execution_result_player", "").strip()
-        tclaimed = row.get("target_claimed_role", "").strip()
-        rclaimed = row.get("result_claimed_role", "").strip()
+    for claim_context_row in _read_csv(out_dir / "execution_claim_context.csv"):
+        target_name = claim_context_row.get("likely_target_player", "").strip()
+        result_name = claim_context_row.get("execution_result_player", "").strip()
+        target_claimed_role = claim_context_row.get("target_claimed_role", "").strip()
+        result_claimed_role = claim_context_row.get("result_claimed_role", "").strip()
 
-        if target and tclaimed:
-            norm = _norm_name(target, aliases)
+        if target_name and target_claimed_role:
+            player_key = player_key_from_name(target_name, aliases)
             try:
-                tconf = float(row.get("target_claim_confidence", 0) or 0)
+                target_claim_conf = float(claim_context_row.get("target_claim_confidence", 0) or 0)
             except ValueError:
-                tconf = 0.0
+                target_claim_conf = 0.0
             try:
-                vws = float(row.get("vote_window_start", 0) or 0)
+                vote_window_start = float(claim_context_row.get("vote_window_start", 0) or 0)
             except ValueError:
-                vws = 0.0
-            prev = pressure_claim.get(norm)
-            if prev is None:
-                pressure_claim[norm] = row
+                vote_window_start = 0.0
+            prev_best = best_pressure_claim_by_player.get(player_key)
+            if prev_best is None:
+                best_pressure_claim_by_player[player_key] = claim_context_row
             else:
                 try:
-                    prev_conf = float(prev.get("target_claim_confidence", 0) or 0)
+                    prev_conf = float(prev_best.get("target_claim_confidence", 0) or 0)
                 except ValueError:
                     prev_conf = 0.0
                 try:
-                    prev_vws = float(prev.get("vote_window_start", 0) or 0)
+                    prev_vote_start = float(prev_best.get("vote_window_start", 0) or 0)
                 except ValueError:
-                    prev_vws = 0.0
+                    prev_vote_start = 0.0
                 # Prefer higher confidence; tie: most recent vote window
-                if tconf > prev_conf or (tconf == prev_conf and vws > prev_vws):
-                    pressure_claim[norm] = row
+                if target_claim_conf > prev_conf or (target_claim_conf == prev_conf and vote_window_start > prev_vote_start):
+                    best_pressure_claim_by_player[player_key] = claim_context_row
 
-        if result and rclaimed:
-            norm = _norm_name(result, aliases)
-            if norm not in execution_claim:
-                execution_claim[norm] = row
+        if result_name and result_claimed_role:
+            player_key = player_key_from_name(result_name, aliases)
+            if player_key not in best_execution_claim_by_player:
+                best_execution_claim_by_player[player_key] = claim_context_row
 
-    # 6. Assemble one row per player
-    rows: list[dict] = []
+    # 6. Assemble one outcome row per player
+    outcome_rows: list[dict] = []
 
-    for norm_key, (display_name, actual_role_raw) in roster.items():
-        actual_role_norm = normalize_role(actual_role_raw)
-        actual_role_disp = display_role(actual_role_raw) if actual_role_raw else ""
+    for player_key, (display_name, actual_role_raw) in roster.items():
+        normalized_actual_role = normalize_role(actual_role_raw)
+        display_actual_role = display_role(actual_role_raw) if actual_role_raw else ""
 
         # Alignment — via botc_ui._team(); never hardcoded
         alignment = ""
-        if actual_role_norm:
-            team = _team(actual_role_norm)
+        if normalized_actual_role:
+            team = _team(normalized_actual_role)
             if team:
                 alignment = team   # "Good" or "Evil"
 
-        # Outcome
-        death_row = death_by_player.get(norm_key)
-        died = "true" if death_row else "false"
-        survived = "false" if death_row else "true"
+        # Outcome fields
+        death_event = earliest_death_by_player.get(player_key)
+        died = "true" if death_event else "false"
+        survived = "false" if death_event else "true"
         survived_to_end = survived
-        death_type = death_row["event_type"] if death_row else ""
+        death_type = death_event["event_type"] if death_event else ""
         was_executed = (
-            "true" if (death_row and death_row["event_type"] == "execution") else "false"
+            "true" if (death_event and death_event["event_type"] == "execution") else "false"
         )
-        death_ts = death_row["timestamp_start"] if death_row else ""
-        exec_ts = death_ts if was_executed == "true" else ""
+        death_timestamp = death_event["timestamp_start"] if death_event else ""
+        execution_timestamp = death_timestamp if was_executed == "true" else ""
 
-        # General claims
-        player_claims = claims_by_player.get(norm_key, [])
-        claim_count = len(player_claims)
-        first_claimed_raw = player_claims[0]["claimed_role"].strip() if player_claims else ""
-        # last = highest confidence, tie-break on most recent
-        best_last = (
-            max(player_claims, key=lambda r: (r["_conf"], r["_ts"]))
-            if player_claims
+        # General claim fields (from N3)
+        player_claim_rows = claims_by_player.get(player_key, [])
+        claim_count = len(player_claim_rows)
+        first_claimed_role_raw = player_claim_rows[0]["claimed_role"].strip() if player_claim_rows else ""
+        # highest confidence claim, tie-break on most recent
+        highest_conf_claim = (
+            max(player_claim_rows, key=lambda claim_row: (claim_row["_conf"], claim_row["_ts"]))
+            if player_claim_rows
             else None
         )
-        last_claimed_raw = best_last["claimed_role"].strip() if best_last else ""
-        last_claim_conf = round(best_last["_conf"], 3) if best_last else ""
-        lied = (
+        last_claimed_role_raw = highest_conf_claim["claimed_role"].strip() if highest_conf_claim else ""
+        last_claim_conf = round(highest_conf_claim["_conf"], 3) if highest_conf_claim else ""
+        lied_about_role = (
             "true"
-            if any(r.get("verified_lie", "").lower() == "true" for r in player_claims)
+            if any(claim_row.get("verified_lie", "").lower() == "true" for claim_row in player_claim_rows)
             else "false"
         )
 
         # Staleness: last claim relative to death or game end
-        if best_last:
-            reference_t = (
-                float(death_ts) if death_ts else (duration if duration > 0 else 9999.0)
+        if highest_conf_claim:
+            staleness_reference_t = (
+                float(death_timestamp) if death_timestamp else (duration if duration > 0 else 9999.0)
             )
-            recency = reference_t - best_last["_ts"]
-            last_claim_stale = "true" if recency > _CLAIM_STALE_S else "false"
+            claim_recency_s = staleness_reference_t - highest_conf_claim["_ts"]
+            last_claim_stale = "true" if claim_recency_s > _CLAIM_STALE_S else "false"
         else:
             last_claim_stale = ""
 
-        # N6 counts
-        pcount = pressure_count.get(norm_key, 0)
-        ecount = execution_count.get(norm_key, 0)
+        # N6 pressure and execution episode counts
+        n_pressure_episodes = pressure_episode_count_by_player.get(player_key, 0)
+        n_execution_episodes = execution_episode_count_by_player.get(player_key, 0)
 
         # N7 claims at key moments
-        pclaim_row = pressure_claim.get(norm_key)
-        eclaim_row = execution_claim.get(norm_key)
+        best_pressure_claim_row = best_pressure_claim_by_player.get(player_key)
+        best_execution_claim_row = best_execution_claim_by_player.get(player_key)
 
         claimed_at_pressure_raw = (
-            pclaim_row.get("target_claimed_role", "").strip() if pclaim_row else ""
+            best_pressure_claim_row.get("target_claimed_role", "").strip()
+            if best_pressure_claim_row else ""
         )
-        tgt_match = (
-            pclaim_row.get("target_claim_match_status", "").strip() if pclaim_row else ""
+        pressure_claim_match = (
+            best_pressure_claim_row.get("target_claim_match_status", "").strip()
+            if best_pressure_claim_row else ""
         )
         claimed_at_execution_raw = (
-            eclaim_row.get("result_claimed_role", "").strip() if eclaim_row else ""
+            best_execution_claim_row.get("result_claimed_role", "").strip()
+            if best_execution_claim_row else ""
         )
-        res_match = (
-            eclaim_row.get("result_claim_match_status", "").strip() if eclaim_row else ""
+        execution_claim_match = (
+            best_execution_claim_row.get("result_claim_match_status", "").strip()
+            if best_execution_claim_row else ""
         )
 
-        rows.append(
+        outcome_rows.append(
             {
                 "video_id": video_id,
                 "player_name": display_name,
-                "actual_role": actual_role_disp,
+                "actual_role": display_actual_role,
                 "alignment": alignment,
                 "winner": winner or "",
                 "survived": survived,
                 "died": died,
                 "was_executed": was_executed,
                 "death_type": death_type,
-                "death_timestamp": death_ts,
-                "execution_timestamp": exec_ts,
+                "death_timestamp": death_timestamp,
+                "execution_timestamp": execution_timestamp,
                 "survived_to_end": survived_to_end,
-                "first_claimed_role": _display_claimed(first_claimed_raw),
-                "last_claimed_role": _display_claimed(last_claimed_raw),
+                "first_claimed_role": _display_claimed(first_claimed_role_raw),
+                "last_claimed_role": _display_claimed(last_claimed_role_raw),
                 "last_claim_confidence": last_claim_conf,
                 "last_claim_stale": last_claim_stale,
                 "claim_count": claim_count,
-                "lied_about_role": lied,
+                "lied_about_role": lied_about_role,
                 "claimed_role_at_pressure": _display_claimed(claimed_at_pressure_raw),
-                "target_claim_match_status": tgt_match,
+                "target_claim_match_status": pressure_claim_match,
                 "claimed_role_at_execution": _display_claimed(claimed_at_execution_raw),
-                "result_claim_match_status": res_match,
-                "pressure_episode_count": pcount,
-                "targeted_in_n6": "true" if pcount > 0 else "false",
-                "execution_episode_count": ecount,
-                "executed_in_n6": "true" if ecount > 0 else "false",
+                "result_claim_match_status": execution_claim_match,
+                "pressure_episode_count": n_pressure_episodes,
+                "targeted_in_n6": "true" if n_pressure_episodes > 0 else "false",
+                "execution_episode_count": n_execution_episodes,
+                "executed_in_n6": "true" if n_execution_episodes > 0 else "false",
             }
         )
 
-    return rows
+    return outcome_rows
 
 
 # ── I/O ───────────────────────────────────────────────────────────────────────
 
-def _write_csv(rows: list[dict], out_path: Path) -> None:
+def write_outcome_rows(outcome_rows: list[dict], out_path: Path) -> None:
+    """Write the per-player outcome rows to a CSV file."""
     with open(out_path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=_FIELDNAMES)
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(outcome_rows)
 
 
-def _load_playlist() -> dict[str, dict]:
-    """Return {video_id: {winner, duration, members, ...}}."""
+def load_playlist_index() -> dict[str, dict]:
+    """Return {video_id: playlist_entry} for all entries in playlist.json."""
     p = Path("playlist.json")
     if not p.exists():
         return {}
@@ -462,17 +471,17 @@ def main() -> None:
         print("       python build_claimed_role_outcomes.py --all [--force]")
         sys.exit(1)
 
-    playlist = _load_playlist()
+    playlist = load_playlist_index()
     aliases = load_player_aliases()
 
     to_process = list(_eligible_videos(playlist, args.all, args.video_id))
     print(f"Processing {len(to_process)} videos ...")
 
-    total_rows = 0
+    total_player_rows = 0
     skipped = 0
     errors = 0
 
-    for video_id, entry in to_process:
+    for video_id, playlist_entry in to_process:
         out_dir = Path("outputs") / video_id
         out_path = out_dir / _OUT_FILE
 
@@ -481,59 +490,59 @@ def main() -> None:
             skipped += 1
             continue
 
-        winner = entry.get("winner") or ""
-        duration = float(entry.get("duration") or 0)
+        winner = playlist_entry.get("winner") or ""
+        duration = float(playlist_entry.get("duration") or 0)
 
         try:
-            rows = _process_video(video_id, out_dir, winner, duration, aliases)
+            outcome_rows = build_outcome_rows_for_video(video_id, out_dir, winner, duration, aliases)
         except Exception as exc:
             print(f"  {video_id}: ERROR — {exc}", file=sys.stderr)
             errors += 1
             continue
 
-        if not rows:
+        if not outcome_rows:
             print(f"  {video_id}: no roster, skipping")
             skipped += 1
             continue
 
-        _write_csv(rows, out_path)
-        total_rows += len(rows)
+        write_outcome_rows(outcome_rows, out_path)
+        total_player_rows += len(outcome_rows)
 
         # Summary stats
-        survived_cnt = sum(1 for r in rows if r["survived"] == "true")
-        pressured_cnt = sum(1 for r in rows if r["targeted_in_n6"] == "true")
-        executed_cnt = sum(1 for r in rows if r["executed_in_n6"] == "true")
-        claimed_cnt = sum(1 for r in rows if r["last_claimed_role"])
-        liars = sum(1 for r in rows if r["lied_about_role"] == "true")
+        survived_count = sum(1 for r in outcome_rows if r["survived"] == "true")
+        pressured_count = sum(1 for r in outcome_rows if r["targeted_in_n6"] == "true")
+        executed_count = sum(1 for r in outcome_rows if r["executed_in_n6"] == "true")
+        claimed_count = sum(1 for r in outcome_rows if r["last_claimed_role"])
+        liar_count = sum(1 for r in outcome_rows if r["lied_about_role"] == "true")
 
         print(
-            f"  {video_id}: {len(rows)} players  "
-            f"survived={survived_cnt}  pressured={pressured_cnt}  "
-            f"executed={executed_cnt}  with_last_claim={claimed_cnt}  "
-            f"liars={liars}"
+            f"  {video_id}: {len(outcome_rows)} players  "
+            f"survived={survived_count}  pressured={pressured_count}  "
+            f"executed={executed_count}  with_last_claim={claimed_count}  "
+            f"liars={liar_count}"
         )
 
         # Show interesting examples
-        for r in rows:
-            if r["claimed_role_at_execution"]:
+        for outcome_row in outcome_rows:
+            if outcome_row["claimed_role_at_execution"]:
                 print(
-                    f"    claimed_at_exec:    {r['player_name']} "
-                    f"claimed={r['claimed_role_at_execution']} "
-                    f"actual={r['actual_role']} "
-                    f"match={r['result_claim_match_status']}"
+                    f"    claimed_at_exec:    {outcome_row['player_name']} "
+                    f"claimed={outcome_row['claimed_role_at_execution']} "
+                    f"actual={outcome_row['actual_role']} "
+                    f"match={outcome_row['result_claim_match_status']}"
                 )
-            if r["claimed_role_at_pressure"] and r["targeted_in_n6"] == "true":
+            if outcome_row["claimed_role_at_pressure"] and outcome_row["targeted_in_n6"] == "true":
                 print(
-                    f"    claimed_at_pressure: {r['player_name']} "
-                    f"claimed={r['claimed_role_at_pressure']} "
-                    f"actual={r['actual_role']} "
-                    f"survived={r['survived']} "
-                    f"match={r['target_claim_match_status']}"
+                    f"    claimed_at_pressure: {outcome_row['player_name']} "
+                    f"claimed={outcome_row['claimed_role_at_pressure']} "
+                    f"actual={outcome_row['actual_role']} "
+                    f"survived={outcome_row['survived']} "
+                    f"match={outcome_row['target_claim_match_status']}"
                 )
 
     print(
         f"\nDone: {len(to_process)} videos processed, "
-        f"{total_rows} player rows written, "
+        f"{total_player_rows} player rows written, "
         f"{skipped} skipped, {errors} errors."
     )
 
