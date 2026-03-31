@@ -44,6 +44,16 @@ nemo_experiments/
 
 # ── Generated artifacts ───────────────────────────────────────────────────────
 landing.html
+marts/
+
+# ── Pipeline runtime state ────────────────────────────────────────────────────
+error.log
+downstream_runs.json
+transcription_runs.json
+sheet_data.csv
+
+# ── ChatGPT bridge local state ────────────────────────────────────────────────
+chatgpt_session/
 
 # ── Local tooling / IDE ────────────────────────────────────────────────────────
 .claude/
