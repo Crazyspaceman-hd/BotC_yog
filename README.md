@@ -28,7 +28,7 @@ Install these before anything else:
 
 - **Python 3.10+**
 - **ffmpeg** — must be on your `PATH` (used for audio extraction and resampling)
-- **yt-dlp** — installed via `requirements_pipeline.txt`, but must also be available as a CLI command for member-only video auth
+- **yt-dlp** — installed via `requirements.txt`, but must also be available as a CLI command for member-only video auth
 - **Tesseract** or **easyocr** — optional, required for the `scrape` step
 - **CUDA-capable GPU** — optional but strongly recommended for the `diarize` step (NeMo is very slow on CPU)
 
@@ -42,11 +42,7 @@ Two separate virtual environments are used to avoid dependency conflicts between
 # Main pipeline (download, transcribe, merge, patch, scrape, analyze)
 python -m venv .venv
 .venv\Scripts\activate            # Windows
-pip install -r requirements_pipeline.txt
-
-# Web UI only (Streamlit apps)
-# Can share .venv above, or install separately:
-pip install -r requirements.txt
+pip install -r requirements.txt   # pipeline + UI + browser bridge
 
 # Diarization only (heavy GPU dependencies)
 python -m venv .venv_botc

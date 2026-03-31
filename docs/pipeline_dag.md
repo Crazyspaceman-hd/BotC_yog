@@ -318,7 +318,7 @@ No new extraction is performed. Claims are not forced when evidence is absent.
 | **Acceptance** | `whisper_segments.jsonl` is non-zero and contains valid JSONL |
 | **Downstream** | D |
 | **Prereqs** | `faster-whisper` installed; CUDA GPU recommended; model `medium` by default |
-| **Notes** | Windows: nvidia DLLs registered automatically before import. `vad_filter=True` removes silence. To bulk re-transcribe: `python retranscribe_all.py`. |
+| **Notes** | Windows: nvidia DLLs registered automatically before import. `vad_filter=True` removes silence. To bulk re-transcribe: `python batch_transcribe.py`. |
 
 ---
 
@@ -731,7 +731,7 @@ bash scripts/run_all.sh
 |--------|------|
 | `calibrate_scraper.py` | Visual tuning tool for OCR crop regions in `scrape_intro.py` |
 | `compare_rosters.py` | Diffs DB roster against the episode spreadsheet; fuzzy title matching |
-| `retranscribe_all.py` | Bulk re-transcribe all eligible videos (e.g. after model upgrade) |
+| `batch_transcribe.py` | Bulk re-transcribe all eligible videos (e.g. after model upgrade); use `retranscribe_all` flag |
 | `batch_transcribe.py` | Batch orchestration for retranscription runs with progress tracking |
 | `batch_downstream.py` | Batch orchestration for downstream (merge/patch/analyze) processing |
 | `explore.py` | Full Streamlit editor (read/write) — local only |

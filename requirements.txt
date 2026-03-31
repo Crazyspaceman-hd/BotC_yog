@@ -1,2 +1,12 @@
-streamlit>=1.32
+# Core pipeline dependencies
+yt-dlp
+faster-whisper
 pandas>=2.0
+numpy
+soundfile
+
+# UI / viewer
+streamlit>=1.32
+
+# ChatGPT browser bridge
+playwright>=1.44

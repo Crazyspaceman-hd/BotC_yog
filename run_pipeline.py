@@ -232,8 +232,21 @@ def _run_step(step: str, video_id: str, force: bool, browser: str | None = None)
         diarize_nemo.main(video_id)
 
     elif step == "merge":
-        import merge_segments
-        merge_segments.main(video_id)
+        import json as _json
+        import pandas as _pd
+        from pipeline_utils import parse_rttm, best_speaker
+        _out = Path(f"outputs/{video_id}")
+        _turns = parse_rttm(_out / "diarization.rttm")
+        _rows = []
+        for _line in (_out / "whisper_segments.jsonl").read_text(encoding="utf-8").splitlines():
+            _seg = _json.loads(_line)
+            _rows.append({"start": _seg["start"], "end": _seg["end"],
+                          "speaker": best_speaker(_seg["start"], _seg["end"], _turns),
+                          "text": _seg["text"]})
+        _df = _pd.DataFrame(_rows)
+        _df.to_csv(_out / "segments.csv", index=False)
+        print("Wrote:", _out / "segments.csv")
+        print(_df.head(10).to_string(index=False))
 
     elif step == "patch":
         import patch_transcript

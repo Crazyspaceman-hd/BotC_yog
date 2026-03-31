@@ -77,7 +77,6 @@ bash scripts/run_all.sh
 ## Utilities
 ```bash
 python fetch_playlist.py                                   # refresh playlist.json
-python retranscribe_all.py                                 # bulk re-transcribe
 python batch_transcribe.py                                 # batch transcription with tracking
 python batch_downstream.py                                 # batch downstream (merge/patch/analyze)
 streamlit run explore.py                                   # full editor (local)
