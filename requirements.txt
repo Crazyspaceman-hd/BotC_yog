@@ -8,5 +8,3 @@ soundfile
 # UI / viewer
 streamlit>=1.32
 
-# ChatGPT browser bridge
-playwright>=1.44
