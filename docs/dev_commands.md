@@ -36,7 +36,7 @@ python validate.py --strict                                # fail on warnings to
 python validate.py --json                                  # machine-readable output
 ```
 
-## Optional enrichments (N0/N1/N2/N2b/N3/N4/N5/N6/N7/N8)
+## Optional enrichments (N0/N1/N2/N2b/N3/N4/N5/N6/N7/N8/N9/N10)
 ```bash
 python scan_frames.py <video_id>                           # N0: visual phase signal extraction
 python speaker_consistency.py <video_id>                   # N1: smooth diarization
@@ -61,6 +61,12 @@ python build_execution_claim_context.py --all              # N7: run on all vide
 python build_claimed_role_outcomes.py <video_id>           # N8: claimed-role outcomes (run after N7+N4)
 python build_claimed_role_outcomes.py <video_id> --force   # N8: re-run, overwriting existing output
 python build_claimed_role_outcomes.py --all                # N8: run on all videos with execution_episodes
+python extract_nomination_events.py <video_id>             # N9: nomination events (run after N2+N5)
+python extract_nomination_events.py <video_id> --force     # N9: re-run, overwriting existing output
+python extract_nomination_events.py --all                  # N9: run on all videos with day_events
+python build_execution_nomination_link.py <video_id>       # N10: link nominations to episodes (run after N6+N9)
+python build_execution_nomination_link.py <video_id> --force # N10: re-run, overwriting existing output
+python build_execution_nomination_link.py --all            # N10: run on all videos with execution_episodes
 ```
 
 ## Full orchestrated run
