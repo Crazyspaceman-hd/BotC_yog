@@ -444,7 +444,7 @@ def check_partial_downloads(rpt: Report) -> None:
 
 def check_enrichment_artifacts(rpt: Report,
                                video_ids: list[str] | None = None) -> None:
-    """Report presence/validity of optional N1/N2/N3 enrichment artifacts.
+    """Report presence/validity of optional N0–N4 enrichment artifacts.
 
     These are always INFO-level — missing enrichment files never cause WARN or FAIL.
     Only run for 'analyzed' videos where the enrichment could have been generated.
@@ -460,7 +460,7 @@ def check_enrichment_artifacts(rpt: Report,
     targets  = [v for v in analyzed
                 if video_ids is None or v in video_ids]
 
-    n0_present = n1_present = n2_valid = n3_valid = 0
+    n0_present = n1_present = n2_valid = n3_valid = n4_valid = 0
     n_total    = len(targets)
     issues: list[str] = []
 
@@ -533,15 +533,35 @@ def check_enrichment_artifacts(rpt: Report,
         p_claims = out / "claims.csv"
         if p_claims.exists():
             try:
-                rows = list(_csv.DictReader(p_claims.open(encoding="utf-8")))
+                list(_csv.DictReader(p_claims.open(encoding="utf-8")))
                 n3_valid += 1
             except Exception as exc:
                 issues.append(f"{vid}: claims.csv unreadable — {exc}")
 
+        # N4: player_status.csv + death_events.csv
+        p_pstatus = out / "player_status.csv"
+        p_deathe  = out / "death_events.csv"
+        if p_pstatus.exists() and p_deathe.exists():
+            try:
+                list(_csv.DictReader(p_pstatus.open(encoding="utf-8")))
+                derows = list(_csv.DictReader(p_deathe.open(encoding="utf-8")))
+                valid_etypes = {"execution", "night_death", "uncertain_death"}
+                bad_et = [r["event_type"] for r in derows
+                          if r.get("event_type") not in valid_etypes]
+                if bad_et:
+                    issues.append(
+                        f"{vid}: death_events.csv has unrecognised event_type: {bad_et[:3]}"
+                    )
+                else:
+                    n4_valid += 1
+            except Exception as exc:
+                issues.append(f"{vid}: N4 CSV unreadable — {exc}")
+
     summary = (f"N0 scan: {n0_present}/{n_total}  "
                f"N1 consistency: {n1_present}/{n_total}  "
                f"N2 phases: {n2_valid}/{n_total}  "
-               f"N3 claims: {n3_valid}/{n_total}")
+               f"N3 claims: {n3_valid}/{n_total}  "
+               f"N4 status: {n4_valid}/{n_total}")
     rpt.add(INFO, "enrichment:artifacts", summary)
 
     for issue in issues:
