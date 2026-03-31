@@ -173,6 +173,7 @@ def run_interactive(page):
 
 
 def main():
+    global RESPONSE_TIMEOUT
     parser = argparse.ArgumentParser(description="ChatGPT browser bridge")
     parser.add_argument("prompt", nargs="?", help="Prompt to send (optional)")
     parser.add_argument(
@@ -193,7 +194,6 @@ def main():
     )
     args = parser.parse_args()
 
-    global RESPONSE_TIMEOUT
     RESPONSE_TIMEOUT = args.timeout
 
     # Read prompt from stdin if piped

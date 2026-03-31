@@ -54,7 +54,7 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
-from pipeline_utils import load_player_aliases, normalize_player, resolve_player_name
+from pipeline_utils import load_player_aliases, load_roster, normalize_player, resolve_player_name
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
@@ -89,9 +89,17 @@ _DEDUP_WINDOW_S: float = 30.0
 
 # Context modes that allow public kill-pressure and nomination patterns.
 # EXCLUDES private_like (night_private_action, storyteller_narration) and intro.
+#
+# morning_result_announcement is included: corpus evidence shows that players
+# make formal nominations ("I nominate X", "I'll nominate Briony") during the
+# morning period, which is public Day discourse.  audience_scope is "public"
+# for these segments (verified across 28 corpus examples, 17 videos).
+# The context was already in _RESULT_NARRATION_CONTEXTS; adding it here aligns
+# nomination/pressure gating with the same boundary.
 _PUBLIC_DAY_CONTEXTS = frozenset({
     "public_day_discussion",
     "execution_window",
+    "morning_result_announcement",
 })
 
 # Context modes where execution-result narration is expected.
@@ -177,6 +185,25 @@ _EXECUTION_RESULT_TEMPLATES: list[tuple[str, float]] = [
     (r"\b(?:we'?re|i'?m|we\s+are|i\s+am)\s+executing\s+{name}\b", 0.80),
 ]
 
+# Self-nomination: "I nominate myself" / "I'll nominate myself" / etc.
+# Used to resolve reflexive nominations when the speaker's player identity is
+# already known.  "myself" is the only reflexive handled here — no general
+# pronoun inference.  Confidence is one step below named-target (0.85) because
+# the target is inferred from the speaker map rather than named directly.
+_SELF_NOM_RE = re.compile(
+    r"\b(?:"
+    r"I\s+(?:would\s+like\s+to\s+|want\s+to\s+|am\s+going\s+to\s+|will\s+|could\s+)?"
+    r"|I'(?:ll|d)\s+(?:like\s+to\s+)?"
+    r"|I'?m\s+going\s+to\s+"
+    r")nominate\s+myself\b",
+    re.I,
+)
+_SELF_NOM_CONF: float = 0.80
+
+# Guard: skip if the self-nomination phrase is immediately preceded by "like,"
+# which signals reported speech ("Zylus is often like, I nominate myself").
+_REPORTED_SPEECH_GUARD_RE = re.compile(r"\blike\s*,\s*$", re.I)
+
 # Defending a player against execution pressure (opposition to a kill push).
 _EXECUTION_OPPOSITION_TEMPLATES: list[tuple[str, float]] = [
     # "don't kill / execute X"
@@ -206,34 +233,6 @@ def _load_segments(out_dir: Path) -> list[dict]:
             with p.open(encoding="utf-8", newline="") as fh:
                 return list(csv.DictReader(fh))
     return []
-
-
-def _load_roster(out_dir: Path, aliases: dict) -> dict[str, str]:
-    """Return {canonical_name: actual_role} from intro_roster + overrides."""
-    roster: dict[str, str] = {}
-    intro = out_dir / "intro_roster.json"
-    if intro.exists():
-        try:
-            data = json.loads(intro.read_text(encoding="utf-8"))
-            for p in data.get("players", []):
-                raw = p.get("name", "").strip()
-                role = p.get("actual_role", "").strip()
-                if raw:
-                    roster[resolve_player_name(raw, aliases)] = role
-        except Exception:
-            pass
-    overrides = out_dir / "roster_overrides.json"
-    if overrides.exists():
-        try:
-            ov = json.loads(overrides.read_text(encoding="utf-8"))
-            for spk, info in ov.items():
-                raw = info.get("name", "").strip()
-                role = info.get("actual_role", "").strip()
-                if raw and raw.lower() not in ("storyteller", spk.lower()):
-                    roster.setdefault(resolve_player_name(raw, aliases), role)
-        except Exception:
-            pass
-    return roster
 
 
 def _load_speaker_map(out_dir: Path, aliases: dict) -> dict[str, str]:
@@ -489,7 +488,7 @@ def extract(video_id: str, force: bool = False) -> bool:
         print(f"  SKIP {video_id}: no segments file")
         return False
 
-    roster = _load_roster(out_dir, aliases)
+    roster = load_roster(out_dir, aliases)
     if not roster:
         print(f"  SKIP {video_id}: empty roster (blind/members game?)")
         return False
@@ -590,6 +589,20 @@ def extract(video_id: str, force: bool = False) -> bool:
         # Skip if this segment doesn't qualify for any pattern type.
         if not in_public_day and not in_result_context:
             continue
+
+        # ── Self-nomination: "I nominate myself" → speaker's own player name ────
+        # Fires only when: in_public_day, not ST, and the speaker maps to a known
+        # roster player.  The reported-speech guard skips "like, I nominate myself"
+        # constructions where the phrase is attributed to a third party.
+        if in_public_day and not is_st and source_player and source_player in roster:
+            m_self = _SELF_NOM_RE.search(text)
+            if m_self and not _REPORTED_SPEECH_GUARD_RE.search(text[: m_self.start()]):
+                events.append(_make_event(
+                    t=t, speaker=speaker, source_player=source_player,
+                    target=source_player, roster=roster,
+                    event_type="nomination_reference",
+                    conf=_SELF_NOM_CONF, ctx_mode=ctx_mode, phase=phase, text=text,
+                ))
 
         for pname in players:
             # Nomination reference: players nominate — exclude ST.

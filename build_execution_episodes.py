@@ -66,7 +66,7 @@ import traceback
 from collections import defaultdict
 from pathlib import Path
 
-from pipeline_utils import load_player_aliases, resolve_player_name
+from pipeline_utils import load_player_aliases, load_roster
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
@@ -146,34 +146,6 @@ def _load_phase_labels(out_dir: Path) -> list[dict]:
         return []
     with p.open(encoding="utf-8", newline="") as fh:
         return list(csv.DictReader(fh))
-
-
-def _load_roster(out_dir: Path, aliases: dict) -> dict[str, str]:
-    """Return {canonical_player_name: actual_role}."""
-    roster: dict[str, str] = {}
-    intro = out_dir / "intro_roster.json"
-    if intro.exists():
-        try:
-            data = json.loads(intro.read_text(encoding="utf-8"))
-            for p in data.get("players", []):
-                raw = p.get("name", "").strip()
-                role = p.get("actual_role", "").strip()
-                if raw:
-                    roster[resolve_player_name(raw, aliases)] = role
-        except Exception:
-            pass
-    overrides = out_dir / "roster_overrides.json"
-    if overrides.exists():
-        try:
-            ov = json.loads(overrides.read_text(encoding="utf-8"))
-            for speaker_id, player_info in ov.items():
-                raw = player_info.get("name", "").strip()
-                role = player_info.get("actual_role", "").strip()
-                if raw and raw.lower() not in ("storyteller", speaker_id.lower()):
-                    roster.setdefault(resolve_player_name(raw, aliases), role)
-        except Exception:
-            pass
-    return roster
 
 
 # ── Phase helper ───────────────────────────────────────────────────────────────
@@ -291,7 +263,7 @@ def extract(video_id: str, force: bool = False) -> bool:
 
     execution_context_events = _load_execution_context_events(out_dir)
     phase_labels = _load_phase_labels(out_dir)
-    roster = _load_roster(out_dir, aliases)
+    roster = load_roster(out_dir, aliases)
 
     # Only VoteSequence rows — skip NominationStart, DayEnd, ExecutionAnnouncement, etc.
     vote_seqs = [e for e in day_events if e.get("event") == "VoteSequence"]

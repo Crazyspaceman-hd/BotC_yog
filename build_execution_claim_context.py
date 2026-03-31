@@ -48,7 +48,7 @@ import json
 import traceback
 from pathlib import Path
 
-from pipeline_utils import load_player_aliases, resolve_player_name
+from pipeline_utils import load_player_aliases, resolve_player_name, ts_to_seconds
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
@@ -102,29 +102,6 @@ _FIELDNAMES = [
     "source",
 ]
 
-# ── Timestamp helpers ──────────────────────────────────────────────────────────
-
-
-def _ts_to_seconds(ts: str) -> float:
-    """Convert claims.csv timestamp ('MM:SS.ss') to float seconds.
-
-    Accepts MM:SS.ss or plain float-seconds strings.
-    """
-    ts = ts.strip()
-    if ":" in ts:
-        parts = ts.split(":")
-        try:
-            minutes = float(parts[0])
-            seconds = float(parts[1])
-            return minutes * 60.0 + seconds
-        except (IndexError, ValueError):
-            pass
-    try:
-        return float(ts)
-    except ValueError:
-        return 0.0
-
-
 # ── Data loaders ───────────────────────────────────────────────────────────────
 
 
@@ -145,7 +122,7 @@ def _load_role_claims(out_dir: Path) -> list[dict]:
     with p.open(encoding="utf-8", newline="") as fh:
         claim_rows = list(csv.DictReader(fh))
     for claim_row in claim_rows:
-        claim_row["timestamp_seconds"] = _ts_to_seconds(claim_row.get("timestamp_start", "0"))
+        claim_row["timestamp_seconds"] = ts_to_seconds(claim_row.get("timestamp_start", "0"))
     claim_rows.sort(key=lambda claim_row: claim_row["timestamp_seconds"])
     return claim_rows
 

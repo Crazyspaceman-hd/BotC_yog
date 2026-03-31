@@ -40,7 +40,7 @@ import sqlite3
 from collections import defaultdict
 from pathlib import Path
 
-from pipeline_utils import load_player_aliases, normalize_player, resolve_player_name
+from pipeline_utils import load_player_aliases, load_roster, normalize_player, resolve_player_name
 
 try:
     from botc_ui import _team as _botc_team  # type: ignore[import]
@@ -230,36 +230,6 @@ def _load_segments(out_dir: Path) -> list[dict]:
             with p.open(encoding="utf-8", newline="") as fh:
                 return list(csv.DictReader(fh))
     return []
-
-
-def _load_roster(out_dir: Path, aliases: dict) -> dict[str, str]:
-    """Return {canonical_name: actual_role} from intro_roster + overrides."""
-    roster: dict[str, str] = {}
-    intro = out_dir / "intro_roster.json"
-    if intro.exists():
-        try:
-            data = json.loads(intro.read_text(encoding="utf-8"))
-            for p in data.get("players", []):
-                raw_name = p.get("name", "").strip()
-                role = p.get("actual_role", "").strip()
-                if raw_name:
-                    canon = resolve_player_name(raw_name, aliases)
-                    roster[canon] = role
-        except Exception:
-            pass
-    overrides = out_dir / "roster_overrides.json"
-    if overrides.exists():
-        try:
-            ov = json.loads(overrides.read_text(encoding="utf-8"))
-            for spk, info in ov.items():
-                raw_name = info.get("name", "").strip()
-                role = info.get("actual_role", "").strip()
-                if raw_name and raw_name.lower() not in ("storyteller", spk.lower()):
-                    canon = resolve_player_name(raw_name, aliases)
-                    roster.setdefault(canon, role)
-        except Exception:
-            pass
-    return roster
 
 
 def _load_speaker_map(out_dir: Path, aliases: dict) -> dict[str, str]:
@@ -643,7 +613,7 @@ def extract(video_id: str, force: bool = False) -> bool:
         print(f"  SKIP {video_id}: no segments file")
         return False
 
-    roster = _load_roster(out_dir, aliases)
+    roster = load_roster(out_dir, aliases)
     if not roster:
         print(f"  SKIP {video_id}: empty roster (blind/members game?)")
         return False

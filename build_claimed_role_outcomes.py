@@ -54,7 +54,9 @@ from pipeline_utils import (
     load_player_aliases,
     normalize_player,
     normalize_role,
+    read_csv,
     resolve_player_name,
+    ts_to_seconds,
 )
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -152,13 +154,6 @@ def _load_roster(out_dir: Path, aliases: dict) -> dict[str, tuple[str, str]]:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _read_csv(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    with open(path, newline="", encoding="utf-8") as fh:
-        return list(csv.DictReader(fh))
-
-
 def player_key_from_name(name: str, aliases: dict) -> str:
     """Normalize a player name to a stable, case-insensitive lookup key.
 
@@ -166,21 +161,6 @@ def player_key_from_name(name: str, aliases: dict) -> str:
     'Lewis Brindley', 'lewis brindley', and 'lewisbrindley' all map to the same key.
     """
     return normalize_player(resolve_player_name(name.strip(), aliases))
-
-
-def _ts_to_seconds(ts: str) -> float:
-    """Parse 'MM:SS.ss' or float-string timestamp to float seconds."""
-    ts = ts.strip()
-    if ":" in ts:
-        parts = ts.split(":")
-        try:
-            return float(parts[0]) * 60.0 + float(parts[1])
-        except (IndexError, ValueError):
-            pass
-    try:
-        return float(ts)
-    except ValueError:
-        return 0.0
 
 
 def _display_claimed(raw: str) -> str:
@@ -206,7 +186,7 @@ def build_outcome_rows_for_video(
 
     # 2. Death events → {player_key: death_event_row}  (earliest death only per player)
     earliest_death_by_player: dict[str, dict] = {}
-    for death_event_row in _read_csv(out_dir / "death_events.csv"):
+    for death_event_row in read_csv(out_dir / "death_events.csv"):
         name = death_event_row.get("player_name", "").strip()
         if not name:
             continue
@@ -217,7 +197,7 @@ def build_outcome_rows_for_video(
     # 3. Role claims → {player_key: [claim_rows sorted by timestamp ascending]}
     # Keep only role_claim events with conf >= threshold and a non-blank claimed_role.
     claims_by_player: dict[str, list[dict]] = defaultdict(list)
-    for claim_row in _read_csv(out_dir / "claims.csv"):
+    for claim_row in read_csv(out_dir / "claims.csv"):
         if claim_row.get("event_type") != "role_claim":
             continue
         if not claim_row.get("claimed_role", "").strip():
@@ -232,7 +212,7 @@ def build_outcome_rows_for_video(
         if not name:
             continue
         player_key = player_key_from_name(name, aliases)
-        claim_row["_ts"] = _ts_to_seconds(claim_row.get("timestamp_start", "0"))
+        claim_row["_ts"] = ts_to_seconds(claim_row.get("timestamp_start", "0"))
         claim_row["_conf"] = claim_conf
         claims_by_player[player_key].append(claim_row)
 
@@ -243,7 +223,7 @@ def build_outcome_rows_for_video(
     # 4. N6 episode counts → per-player pressure / execution episode counts
     pressure_episode_count_by_player: dict[str, int] = defaultdict(int)
     execution_episode_count_by_player: dict[str, int] = defaultdict(int)
-    for episode_row in _read_csv(out_dir / "execution_episodes.csv"):
+    for episode_row in read_csv(out_dir / "execution_episodes.csv"):
         target_name = episode_row.get("likely_target_player", "").strip()
         result_name = episode_row.get("execution_result_player", "").strip()
         if target_name:
@@ -259,7 +239,7 @@ def build_outcome_rows_for_video(
     best_pressure_claim_by_player: dict[str, dict] = {}   # player_key -> best N7 target-side row
     best_execution_claim_by_player: dict[str, dict] = {}  # player_key -> best N7 result-side row
 
-    for claim_context_row in _read_csv(out_dir / "execution_claim_context.csv"):
+    for claim_context_row in read_csv(out_dir / "execution_claim_context.csv"):
         target_name = claim_context_row.get("likely_target_player", "").strip()
         result_name = claim_context_row.get("execution_result_player", "").strip()
         target_claimed_role = claim_context_row.get("target_claimed_role", "").strip()
