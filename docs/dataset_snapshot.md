@@ -92,5 +92,5 @@ Investigated unlinked speakers in `QbzFmlScLSA`, `nPAdvl7pySg`, `OPqWyO7h-wM` (2
 
 | Branch | Purpose | State |
 |--------|---------|-------|
-| `feat/player-status-tracking` | N4–N8 enrichment nodes (player status, execution context, episodes, claim context, outcomes) | **active** |
-| `main` | Stable; awaiting PR merge from feat/player-status-tracking | awaiting merge |
+| `develop` | Integration branch; N2–N10 enrichment, nomination/execution analytics, README + landing update | **ready for merge to main** |
+| `main` | Stable release baseline | awaiting PR from develop |
