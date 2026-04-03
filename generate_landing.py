@@ -598,20 +598,20 @@ _HTML = """\
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <style>
 :root {{
-  --bg:        #0f0f1a;
-  --surface:   #161625;
-  --surface2:  #1e1e35;
-  --border:    #2a2a45;
-  --text:      #e2e8f0;
-  --muted:     #8892a4;
-  --evil:      #dc2626;
-  --evil-dim:  #7f1d1d;
-  --good:      #2563eb;
-  --good-dim:  #1e3a8a;
-  --gold:      #f59e0b;
-  --green:     #16a34a;
-  --radius:    12px;
-  --shadow:    0 4px 24px rgba(0,0,0,.5);
+  --bg:        #f0ebe2;
+  --surface:   #faf8f4;
+  --surface2:  #e8e3d8;
+  --border:    #ccc5b6;
+  --text:      #231e18;
+  --muted:     #7a7068;
+  --evil:      #7d1a1a;
+  --evil-dim:  #f0e5e5;
+  --good:      #1e3d5c;
+  --good-dim:  #e3eaf3;
+  --gold:      #7a5c1e;
+  --green:     #3a5c3c;
+  --radius:    3px;
+  --shadow:    0 2px 6px rgba(0,0,0,.09);
 }}
 *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
 
@@ -631,7 +631,8 @@ a:hover {{ text-decoration: underline; }}
 
 /* ── header / hero ── */
 header {{
-  background: linear-gradient(160deg, #12122a 0%, #1a0a0a 100%);
+  background: var(--surface2);
+  border-top: 3px solid var(--evil);
   border-bottom: 1px solid var(--border);
   padding: 48px 20px 40px;
   text-align: center;
@@ -640,10 +641,7 @@ header {{
   font-size: clamp(2rem, 5vw, 3.2rem);
   font-weight: 800;
   letter-spacing: -0.02em;
-  background: linear-gradient(135deg, #fbbf24 0%, #f87171 60%, #a78bfa 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--text);
   margin-bottom: 8px;
 }}
 .hero-sub {{
@@ -659,9 +657,9 @@ header {{
   margin-bottom: 28px;
 }}
 .stat-bubble {{
-  background: var(--surface2);
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius);
   padding: 10px 22px;
   text-align: center;
   min-width: 110px;
@@ -670,7 +668,7 @@ header {{
   font-size: 1.6rem;
   font-weight: 700;
   line-height: 1.1;
-  color: var(--gold);
+  color: var(--evil);
 }}
 .stat-bubble .lbl {{
   font-size: 0.72rem;
@@ -682,31 +680,30 @@ header {{
 
 .btn-explore {{
   display: inline-block;
-  background: linear-gradient(135deg, #7c3aed, #dc2626);
-  color: #fff !important;
-  font-weight: 700;
+  background: var(--evil);
+  color: #faf8f4 !important;
+  font-weight: 600;
   font-size: 0.95rem;
-  padding: 12px 32px;
-  border-radius: 999px;
+  padding: 11px 30px;
+  border-radius: var(--radius);
   text-decoration: none !important;
-  letter-spacing: .03em;
-  box-shadow: 0 0 20px rgba(124,58,237,.4);
-  transition: transform .15s, box-shadow .15s;
+  letter-spacing: .02em;
+  border: 1px solid transparent;
+  transition: background .15s;
 }}
 .btn-explore:hover {{
-  transform: translateY(-2px);
-  box-shadow: 0 0 30px rgba(124,58,237,.6);
+  background: #9a2222;
 }}
 
 /* ── sections ── */
 section {{
-  padding: 48px 0 16px;
+  padding: 40px 0 16px;
 }}
 .section-title {{
-  font-size: 1.1rem;
+  font-size: 0.8rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: .07em;
+  letter-spacing: .09em;
   color: var(--muted);
   margin-bottom: 20px;
   display: flex;
@@ -732,11 +729,10 @@ section {{
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 18px 16px;
-  transition: transform .15s, box-shadow .15s;
+  transition: background .1s;
 }}
 .sup-card:hover {{
-  transform: translateY(-3px);
-  box-shadow: var(--shadow);
+  background: var(--surface2);
 }}
 .sup-card .icon {{ font-size: 1.8rem; margin-bottom: 6px; }}
 .sup-card .label {{
@@ -821,14 +817,14 @@ td {{
   vertical-align: middle;
 }}
 .team-evil {{
-  color: #fca5a5;
+  color: var(--evil);
   font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: .05em;
 }}
 .team-good {{
-  color: #93c5fd;
+  color: var(--good);
   font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -841,15 +837,15 @@ td {{
 }}
 .rate-bar {{
   flex: 1;
-  height: 6px;
+  height: 5px;
   background: var(--border);
-  border-radius: 999px;
+  border-radius: 1px;
   overflow: hidden;
   min-width: 60px;
 }}
 .rate-bar-fill {{
   height: 100%;
-  border-radius: 999px;
+  border-radius: 1px;
   background: var(--evil);
 }}
 
@@ -865,14 +861,13 @@ td {{
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px;
-  transition: transform .15s, box-shadow .15s;
+  transition: background .1s;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }}
 .game-card:hover {{
-  transform: translateY(-2px);
-  box-shadow: var(--shadow);
+  background: var(--surface2);
 }}
 .game-title {{
   font-size: 0.88rem;
@@ -890,15 +885,15 @@ td {{
   flex-wrap: wrap;
 }}
 .badge {{
-  font-size: 0.7rem;
-  font-weight: 700;
+  font-size: 0.68rem;
+  font-weight: 600;
   letter-spacing: .04em;
-  padding: 2px 9px;
-  border-radius: 999px;
+  padding: 2px 7px;
+  border-radius: 2px;
   text-transform: uppercase;
 }}
-.badge-evil   {{ background: var(--evil-dim);  color: #fca5a5; }}
-.badge-good   {{ background: var(--good-dim);  color: #93c5fd; }}
+.badge-evil   {{ background: var(--evil-dim);  color: var(--evil); }}
+.badge-good   {{ background: var(--good-dim);  color: var(--good); }}
 .badge-none   {{ background: var(--surface2);  color: var(--muted); }}
 .game-stats {{
   font-size: 0.78rem;
@@ -944,12 +939,12 @@ footer a {{ color: var(--gold); }}
   letter-spacing: .04em;
   border-bottom: 1px solid var(--border);
 }}
-.roles-evil-hdr    {{ background: #200d0d; color: #fca5a5; }}
-.roles-good-hdr    {{ background: #0a1120; color: #93c5fd; }}
-.roles-demon-hdr   {{ background: #1a0808; color: #f87171; }}
-.roles-minion-hdr  {{ background: #1a0e07; color: #fdba74; }}
-.roles-outsider-hdr {{ background: #081318; color: #67e8f9; }}
-.roles-townsfolk-hdr {{ background: #0a1120; color: #93c5fd; }}
+.roles-evil-hdr    {{ background: var(--evil-dim);  color: var(--evil); }}
+.roles-good-hdr    {{ background: var(--good-dim);  color: var(--good); }}
+.roles-demon-hdr   {{ background: var(--evil-dim);  color: var(--evil); }}
+.roles-minion-hdr  {{ background: #f5ede0; color: #6b3a0e; }}
+.roles-outsider-hdr {{ background: var(--good-dim); color: var(--good); }}
+.roles-townsfolk-hdr {{ background: #e8f0e8; color: #2a4a2a; }}
 
 /* ── Evil vs Good wins scoreboard ── */
 .wins-board {{
@@ -971,20 +966,18 @@ footer a {{ color: var(--gold); }}
   font-weight: 700;
   margin-bottom: 4px;
 }}
-.wins-good .wins-label {{ color: #93c5fd; }}
-.wins-evil .wins-label {{ color: #fca5a5; }}
+.wins-good .wins-label {{ color: var(--good); }}
+.wins-evil .wins-label {{ color: var(--evil); }}
 .wins-num {{
   font-size: clamp(3.5rem, 9vw, 5.5rem);
   font-weight: 900;
   line-height: 1;
 }}
 .wins-good .wins-num {{
-  color: #60a5fa;
-  text-shadow: 0 0 40px rgba(96,165,250,.45);
+  color: var(--good);
 }}
 .wins-evil .wins-num {{
-  color: #f87171;
-  text-shadow: 0 0 40px rgba(248,113,113,.45);
+  color: var(--evil);
 }}
 .wins-sub {{
   font-size: 0.72rem;
@@ -1003,21 +996,21 @@ footer a {{ color: var(--gold); }}
 .wins-bar-wrap {{
   max-width: 520px;
   margin: 0 auto 28px;
-  height: 7px;
-  border-radius: 999px;
+  height: 5px;
+  border-radius: 1px;
   overflow: hidden;
   background: var(--border);
   display: flex;
 }}
 .wins-bar-good {{
   height: 100%;
-  background: linear-gradient(90deg, #1e40af, #3b82f6);
-  transition: width .8s cubic-bezier(.4,0,.2,1);
+  background: var(--good);
+  transition: width .6s ease;
 }}
 .wins-bar-evil {{
   height: 100%;
-  background: linear-gradient(90deg, #dc2626, #b91c1c);
-  transition: width .8s cubic-bezier(.4,0,.2,1);
+  background: var(--evil);
+  transition: width .6s ease;
 }}
 
 /* ── game records grid ── */
@@ -1032,11 +1025,10 @@ footer a {{ color: var(--gold); }}
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 18px 16px;
-  transition: transform .15s, box-shadow .15s;
+  transition: background .1s;
 }}
 .record-card:hover {{
-  transform: translateY(-2px);
-  box-shadow: var(--shadow);
+  background: var(--surface2);
 }}
 .record-card .icon {{ font-size: 1.6rem; margin-bottom: 6px; }}
 .record-card .label {{
@@ -1070,7 +1062,7 @@ footer a {{ color: var(--gold); }}
   color: var(--gold);
   font-size: 0.78rem;
   padding: 5px 18px;
-  border-radius: 999px;
+  border-radius: var(--radius);
   cursor: pointer;
   transition: background .1s;
 }}
@@ -1083,7 +1075,7 @@ footer a {{ color: var(--gold); }}
   color: var(--muted);
   font-size: 0.75rem;
   padding: 4px 14px;
-  border-radius: 999px;
+  border-radius: var(--radius);
   cursor: pointer;
   transition: border-color .15s, color .15s;
   margin-top: 10px;
@@ -1104,6 +1096,7 @@ footer a {{ color: var(--gold); }}
 #botc-info-modal {{
   background: var(--surface);
   border: 1px solid var(--border);
+  border-top: 3px solid var(--evil);
   border-radius: var(--radius);
   max-width: 560px;
   width: 100%;
@@ -1111,16 +1104,13 @@ footer a {{ color: var(--gold); }}
   position: relative;
   max-height: 82vh;
   overflow-y: auto;
-  box-shadow: 0 8px 40px rgba(0,0,0,.6);
+  box-shadow: 0 4px 20px rgba(0,0,0,.15);
 }}
 #botc-info-modal h2 {{
   font-size: 1.1rem;
   font-weight: 700;
   margin-bottom: 16px;
-  background: linear-gradient(135deg, #fbbf24 0%, #f87171 60%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--text);
 }}
 #botc-info-modal p {{
   font-size: 0.88rem;
@@ -1362,19 +1352,19 @@ body.mc .showmore-btn {{ font-family: 'Press Start 2P', monospace; font-size: 0.
   top: 12px;
   right: 12px;
   z-index: 9999;
-  background: #312a5a;
-  border: 1px solid #2a2a45;
-  color: #e2e8f0;
-  font-size: 0.8rem;
-  font-weight: 700;
-  padding: 8px 14px;
-  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 7px 13px;
+  border-radius: var(--radius);
   cursor: pointer;
-  transition: background .15s, transform .1s;
+  transition: background .15s, color .15s;
   letter-spacing: .02em;
   line-height: 1;
 }}
-#theme-toggle:hover {{ background: #4a3a7a; transform: translateY(-1px); }}
+#theme-toggle:hover {{ background: var(--surface2); color: var(--text); }}
 body.mc #theme-toggle {{
   background: #7f7f7f;
   border: none;
@@ -1477,7 +1467,7 @@ body.mc #theme-toggle:active {{
     <div class="section-title"><span>🎭</span> Role Breakdown <span style="font-size:.8rem;font-weight:400;margin-left:4px;">(min 2 games)</span></div>
 
     <div class="table-card" style="margin-bottom:20px">
-      <div class="roles-team-hdr roles-faked-hdr" style="background:#1a1430;color:#c4b5fd;border-bottom:1px solid var(--border)">🎭 Roles Most Often Faked <span style="font-size:.78rem;font-weight:400;opacity:.7">(min 2 games · sorted by games used as cover)</span></div>
+      <div class="roles-team-hdr roles-faked-hdr" style="background:#ede8f5;color:#4a2d7a;border-bottom:1px solid var(--border)">🎭 Roles Most Often Faked <span style="font-size:.78rem;font-weight:400;opacity:.7">(min 2 games · sorted by games used as cover)</span></div>
       <table>
         <thead>
           <tr>
@@ -1532,8 +1522,8 @@ body.mc #theme-toggle:active {{
         <thead>
           <tr>
             <th>Player</th>
-            <th style="color:#93c5fd">Good WPG</th>
-            <th style="color:#fca5a5">Evil WPG</th>
+            <th style="color:var(--good)">Good WPG</th>
+            <th style="color:var(--evil)">Evil WPG</th>
             <th>E/G Ratio</th>
           </tr>
         </thead>
@@ -1584,11 +1574,11 @@ let _barChart   = null;
 
 function updateChartTheme() {{
   const isMC  = document.body.classList.contains('mc');
-  const gridC = isMC ? '#4a4a4a' : '#2a2a45';
-  const txX   = isMC ? '#aaaaaa' : '#8892a4';
-  const txY   = isMC ? '#ffffff' : '#e2e8f0';
-  const brdC  = isMC ? '#1a1a1a' : '#161625';
-  const legC  = isMC ? '#aaaaaa' : '#8892a4';
+  const gridC = isMC ? '#4a4a4a' : '#ccc5b6';
+  const txX   = isMC ? '#aaaaaa' : '#7a7068';
+  const txY   = isMC ? '#ffffff' : '#231e18';
+  const brdC  = isMC ? '#1a1a1a' : '#faf8f4';
+  const legC  = isMC ? '#aaaaaa' : '#7a7068';
   if (_donutChart) {{
     _donutChart.data.datasets[0].borderColor = brdC;
     _donutChart.options.plugins.legend.labels.color = legC;
@@ -1679,67 +1669,67 @@ function renderSuperlatives() {{
       key: "most_evil", icon: "😈", label: "Most Often Evil",
       name:   s => s.player_name,
       detail: s => `Evil ${{s.evil_g}}/${{s.games}} games (${{(s.evil_rate*100).toFixed(0)}}%)`,
-      bg: "#2a1215",
+      bg: "#f0e5e5", border: "#d4b0b0",
     }},
     {{
       key: "most_good", icon: "😇", label: "Most Often Good",
       name:   s => s.player_name,
       detail: s => `Good ${{s.good_g}}/${{s.games}} games (${{(s.good_rate*100).toFixed(0)}}%)`,
-      bg: "#0e1f2a",
+      bg: "#e3eaf3", border: "#a0b8d0",
     }},
     {{
       key: "biggest_liar", icon: "🤥", label: "Biggest Liar",
       name:   s => s.player_name,
       detail: s => `${{s.lies}} lies · ${{(s.lie_rate*100).toFixed(0)}}% lie rate`,
-      bg: "#2a1215",
+      bg: "#f0e5e5", border: "#d4b0b0",
     }},
     {{
       key: "most_honest", icon: "🌟", label: "Most Honest",
       name:   s => s.player_name,
       detail: s => `${{s.true_}} true · ${{(s.lie_rate*100).toFixed(0)}}% lie rate`,
-      bg: "#0e2a1f",
+      bg: "#e8f2ea", border: "#a8c8aa",
     }},
     {{
       key: "traitor", icon: "🗡️", label: "Lied to Their Town",
       name:   s => s.player_name,
       detail: s => `${{s.good_lies}} lies while playing Good`,
-      bg: "#2a200e",
+      bg: "#f2ede0", border: "#c8b888",
     }},
     {{
       key: "most_games", icon: "🎮", label: "Most Games Played",
       name:   s => s.player_name,
       detail: s => `${{s.games}} appearances`,
-      bg: "#1a1a2e",
+      bg: "#eae8f0", border: "#b8b4cc",
     }},
     {{
       key: "most_talkative", icon: "🗣️", label: "Most Talkative",
       name:   s => s.player_name,
       detail: s => `~${{Math.round(s.wpg).toLocaleString()}} words/game avg`,
-      bg: "#1a2a1a",
+      bg: "#e8f2ea", border: "#a8c8aa",
     }},
     {{
       key: "most_faked_role", icon: "🪪", label: "Favourite Cover Story",
       name:   s => s.role,
       detail: s => `Used as cover in ${{s.games_faked}} game${{s.games_faked !== 1 ? 's' : ''}}`,
-      bg: "#1a1430",
+      bg: "#ede8f5", border: "#b8a8d4",
     }},
     {{
       key: "best_evil_role", icon: "☠️", label: "Most Successful Evil Role",
       name:   s => s.role,
       detail: s => `${{(s.win_rate*100).toFixed(0)}}% win rate (${{s.wins}}/${{s.total_games}} games)`,
-      bg: "#2a1215",
+      bg: "#f0e5e5", border: "#d4b0b0",
     }},
     {{
       key: "best_good_role", icon: "🛡️", label: "Most Successful Good Role",
       name:   s => s.role,
       detail: s => `${{(s.win_rate*100).toFixed(0)}}% win rate (${{s.wins}}/${{s.total_games}} games)`,
-      bg: "#0e2a1f",
+      bg: "#e8f2ea", border: "#a8c8aa",
     }},
     {{
       key: "most_oblivious_outsider", icon: "🫣", label: "Most Often Hidden Outsider",
       name:   s => s.role,
       detail: s => `Never revealed in ${{s.games_not_claimed}}/${{s.games}} games (${{(s.hidden_rate*100).toFixed(0)}}%)`,
-      bg: "#081318",
+      bg: "#e3ecf0", border: "#a0bcc8",
     }},
   ];
 
@@ -1756,8 +1746,7 @@ function renderSuperlatives() {{
          <div class="label">${{c.label}}</div>
          <div class="player" style="color:var(--muted)">—</div>`;
     grid.innerHTML +=
-      `<div class="sup-card" style="border-color:${{c.bg === "#2a1215" ? "#5a1f1f" :
-        c.bg === "#0e1f2a" ? "#1e3a5a" : "var(--border)"}};background:${{c.bg}}">${{html}}</div>`;
+      `<div class="sup-card" style="border-color:${{c.border || 'var(--border)'}};background:${{c.bg}}">${{html}}</div>`;
   }});
 }}
 renderSuperlatives();
@@ -1778,8 +1767,8 @@ function renderDonut() {{
       labels: ["LIE", "TRUE", "UNVERIFIED", "HONEST MISTAKE"],
       datasets: [{{
         data: [s.lies, s.true, s.unverified, s.hm],
-        backgroundColor: ["#dc2626", "#16a34a", "#4b5563", "#d97706"],
-        borderColor: "#161625",
+        backgroundColor: ["#8b2020", "#3a5c3c", "#8a8278", "#7a5c1e"],
+        borderColor: "#faf8f4",
         borderWidth: 3,
         hoverOffset: 8,
       }}],
@@ -1789,7 +1778,7 @@ function renderDonut() {{
         legend: {{
           position: "bottom",
           labels: {{
-            color: "#8892a4",
+            color: "#7a7068",
             font: {{ size: 11 }},
             padding: 12,
           }},
@@ -1850,12 +1839,12 @@ function renderBarChart() {{
       }},
       scales: {{
         x: {{
-          grid:  {{ color: "#2a2a45" }},
-          ticks: {{ color: "#8892a4", font: {{ size: 11 }} }},
+          grid:  {{ color: "#ccc5b6" }},
+          ticks: {{ color: "#7a7068", font: {{ size: 11 }} }},
         }},
         y: {{
           grid:  {{ display: false }},
-          ticks: {{ color: "#e2e8f0", font: {{ size: 12 }} }},
+          ticks: {{ color: "#231e18", font: {{ size: 12 }} }},
         }},
       }},
     }},
@@ -1948,7 +1937,7 @@ function renderRoles() {{
     {{ fn: r => r.games }},
     {{ fn: r => r.wins != null ? r.wins : '—' }},
     {{ fn: r => r.win_rate != null
-                 ? rateBar((r.win_rate * 100).toFixed(0), "#dc2626")
+                 ? rateBar((r.win_rate * 100).toFixed(0), "var(--evil)")
                  : `<span style="color:var(--muted)">—</span>` }},
   ]);
 
@@ -1961,7 +1950,7 @@ function renderRoles() {{
     {{ fn: r => `<span style="font-weight:600">${{r.role}}</span>` }},
     {{ fn: r => r.games }},
     {{ fn: r => r.wins != null ? r.wins : '—' }},
-    {{ fn: r => rateBar((r.lie_rate * 100).toFixed(0), "#f97316") }},
+    {{ fn: r => rateBar((r.lie_rate * 100).toFixed(0), "var(--gold)") }},
   ]);
 
   // ── Outsider: Role | Games | Evil cover | Good cover ────────────────────────
@@ -1974,9 +1963,9 @@ function renderRoles() {{
     {{ fn: r => `<span style="font-weight:600">${{r.role}}</span>` }},
     {{ fn: r => r.games }},
     {{ fn: r => r.games_cover_evil
-                 ? `<span style="color:#fca5a5">${{r.games_cover_evil}}</span>` : '—' }},
+                 ? `<span style="color:var(--evil)">${{r.games_cover_evil}}</span>` : '—' }},
     {{ fn: r => r.games_cover_good
-                 ? `<span style="color:#93c5fd">${{r.games_cover_good}}</span>` : '—' }},
+                 ? `<span style="color:var(--good)">${{r.games_cover_good}}</span>` : '—' }},
   ]);
 
   // ── Townsfolk: Role | Games | Evil cover | Good cover | Not in play ──────────
@@ -1988,11 +1977,11 @@ function renderRoles() {{
     {{ fn: r => `<span style="font-weight:600">${{r.role}}</span>` }},
     {{ fn: r => r.games }},
     {{ fn: r => r.games_cover_evil
-                 ? `<span style="color:#fca5a5">${{r.games_cover_evil}}</span>` : '—' }},
+                 ? `<span style="color:var(--evil)">${{r.games_cover_evil}}</span>` : '—' }},
     {{ fn: r => r.games_cover_good
-                 ? `<span style="color:#93c5fd">${{r.games_cover_good}}</span>` : '—' }},
+                 ? `<span style="color:var(--good)">${{r.games_cover_good}}</span>` : '—' }},
     {{ fn: r => r.games_phantom
-                 ? `<span style="color:#c4b5fd;font-weight:600">${{r.games_phantom}}</span>` : '—' }},
+                 ? `<span style="color:#7a5c9a;font-weight:600">${{r.games_phantom}}</span>` : '—' }},
   ]);
 }}
 renderRoles();
@@ -2067,15 +2056,15 @@ function renderVoiceAnalysis() {{
   }}
   rows.forEach(r => {{
     const ratio = r.ratio;
-    const rc = ratio >= 1.2 ? '#fca5a5' : ratio <= 0.8 ? '#93c5fd' : 'var(--muted)';
+    const rc = ratio >= 1.2 ? 'var(--evil)' : ratio <= 0.8 ? 'var(--good)' : 'var(--muted)';
     const rl = ratio >= 1.2 ? '↑ more chatty as Evil'
              : ratio <= 0.8 ? '↓ more chatty as Good'
              : '≈ roughly equal';
     tbody.innerHTML +=
       `<tr>
         <td style="font-weight:600">${{r.name}}</td>
-        <td style="color:#93c5fd">${{r.good_wpg.toLocaleString()}}</td>
-        <td style="color:#fca5a5">${{r.evil_wpg.toLocaleString()}}</td>
+        <td style="color:var(--good)">${{r.good_wpg.toLocaleString()}}</td>
+        <td style="color:var(--evil)">${{r.evil_wpg.toLocaleString()}}</td>
         <td>
           <span style="font-weight:700;color:${{rc}}">${{ratio.toFixed(2)}}×</span>
           <span style="font-size:.72rem;color:var(--muted);margin-left:5px">${{rl}}</span>
