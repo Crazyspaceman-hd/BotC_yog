@@ -1387,6 +1387,23 @@ body.mc #theme-toggle:hover {{
 body.mc #theme-toggle:active {{
   box-shadow: inset 3px 3px 0 #2d2d2d, inset -3px -3px 0 #cfcfcf;
 }}
+
+/* ── hero graphic ── */
+.hero-graphic-wrap {{
+  max-width: 720px;
+  margin: 28px auto 8px;
+  width: 100%;
+  padding: 0 4px;
+}}
+.hero-graphic {{
+  width: 100%;
+  height: auto;
+  display: block;
+}}
+@media (max-width: 520px) {{
+  .hg-meta {{ display: none; }}
+}}
+body.mc .hero-graphic-wrap {{ display: none; }}
 </style>
 </head>
 <body>
@@ -1397,6 +1414,173 @@ body.mc #theme-toggle:active {{
   <div class="hero-title">🏰 Blood on the Clocktower</div>
   <div class="hero-sub">Yogscast &middot; Behavioral analytics across every game</div>
   <button class="btn-info" onclick="document.getElementById('botc-info-overlay').style.display='flex'">❓ What is Blood on the Clocktower?</button>
+
+  <!-- ── hero graphic: nomination network ── -->
+  <div class="hero-graphic-wrap">
+    <svg class="hero-graphic" viewBox="0 0 700 262" xmlns="http://www.w3.org/2000/svg"
+         role="img" aria-label="Player nomination network showing convergent execution pressure">
+      <defs>
+        <marker id="ah-main" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+          <path d="M0,0 L7,3.5 L0,7 Z" fill="#7d1a1a"/>
+        </marker>
+        <marker id="ah-dim" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+          <path d="M0,0 L6,3 L0,6 Z" fill="#9a9080"/>
+        </marker>
+        <marker id="ah-faint" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto">
+          <path d="M0,0 L5,2.5 L0,5 Z" fill="#c4bdb2"/>
+        </marker>
+        <marker id="ah-gold" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+          <path d="M0,0 L6,3 L0,6 Z" fill="#7a5c1e"/>
+        </marker>
+      </defs>
+
+      <!-- background grid -->
+      <g stroke="#ccc5b6" stroke-width="0.5" opacity="0.32">
+        <line x1="80"  y1="0" x2="80"  y2="250"/>
+        <line x1="160" y1="0" x2="160" y2="250"/>
+        <line x1="240" y1="0" x2="240" y2="250"/>
+        <line x1="320" y1="0" x2="320" y2="250"/>
+        <line x1="400" y1="0" x2="400" y2="250"/>
+        <line x1="480" y1="0" x2="480" y2="250"/>
+        <line x1="560" y1="0" x2="560" y2="250"/>
+        <line x1="640" y1="0" x2="640" y2="250"/>
+        <line x1="0" y1="50"  x2="700" y2="50"/>
+        <line x1="0" y1="100" x2="700" y2="100"/>
+        <line x1="0" y1="150" x2="700" y2="150"/>
+        <line x1="0" y1="200" x2="700" y2="200"/>
+      </g>
+
+      <!-- day timeline strip -->
+      <line x1="20" y1="247" x2="680" y2="247" stroke="#ccc5b6" stroke-width="1"/>
+      <line x1="20"  y1="243" x2="20"  y2="251" stroke="#ccc5b6" stroke-width="1"/>
+      <line x1="185" y1="243" x2="185" y2="251" stroke="#ccc5b6" stroke-width="1"/>
+      <line x1="350" y1="243" x2="350" y2="251" stroke="#ccc5b6" stroke-width="1"/>
+      <line x1="515" y1="243" x2="515" y2="251" stroke="#ccc5b6" stroke-width="1"/>
+      <line x1="680" y1="243" x2="680" y2="251" stroke="#ccc5b6" stroke-width="1"/>
+      <text x="20"  y="261" font-size="8.5" fill="#b0a898" text-anchor="middle" font-family="system-ui,sans-serif">day 1</text>
+      <text x="185" y="261" font-size="8.5" fill="#b0a898" text-anchor="middle" font-family="system-ui,sans-serif">day 2</text>
+      <text x="350" y="261" font-size="8.5" fill="#b0a898" text-anchor="middle" font-family="system-ui,sans-serif">day 3</text>
+      <text x="515" y="261" font-size="8.5" fill="#b0a898" text-anchor="middle" font-family="system-ui,sans-serif">day 4</text>
+      <text x="680" y="261" font-size="8.5" fill="#b0a898" text-anchor="middle" font-family="system-ui,sans-serif">day 5</text>
+
+      <!-- ── edges ── -->
+
+      <!-- Kirsty → Duncan: main highlighted nomination (curved arc over network) -->
+      <path d="M 103,95 Q 315,158 517,95"
+            stroke="#7d1a1a" stroke-width="2.5" fill="none"
+            marker-end="url(#ah-main)" opacity="0.88"/>
+
+      <!-- Nilesy → Duncan: main highlighted nomination (straight) -->
+      <!-- N3 center (378,55) → N4 center (535,95). unit=(0.969,0.247) trim 15px -->
+      <line x1="393" y1="59" x2="521" y2="91"
+            stroke="#7d1a1a" stroke-width="2" fill="none"
+            marker-end="url(#ah-main)" opacity="0.82"/>
+
+      <!-- Rythian → Duncan: secondary nomination (gray, curved) -->
+      <!-- N5 center (145,192) → N4 center (535,95). unit=(0.972,-0.242) trim 15px -->
+      <path d="M 160,188 Q 342,162 520,99"
+            stroke="#9a9080" stroke-width="1.4" fill="none"
+            marker-end="url(#ah-dim)" opacity="0.58"/>
+
+      <!-- Ben → Zoey: nomination with no execution (dashed disagreement) -->
+      <!-- N2 center (222,55) → N7 center (438,195). unit=(0.841,0.545) trim 15px -->
+      <line x1="235" y1="63" x2="425" y2="187"
+            stroke="#9a9080" stroke-width="1.4" fill="none"
+            stroke-dasharray="5,4"
+            marker-end="url(#ah-dim)" opacity="0.50"/>
+
+      <!-- Kirsty → Zoey: faint secondary (also nominated Zoey, not executed) -->
+      <!-- N1 center (85,95) → N7 center (438,195). unit=(0.962,0.274) trim 15px -->
+      <line x1="100" y1="100" x2="424" y2="191"
+            stroke="#c4bdb2" stroke-width="1" fill="none"
+            marker-end="url(#ah-faint)" opacity="0.45"/>
+
+      <!-- Sophie self-nomination loop (cubic arc above node) -->
+      <!-- N6 center (292,195). Arc from left-top to right-top of node -->
+      <path d="M 278,183 C 262,160 322,160 306,183"
+            stroke="#7a5c1e" stroke-width="1.4" fill="none"
+            stroke-dasharray="4,3"
+            marker-end="url(#ah-gold)" opacity="0.78"/>
+
+      <!-- ── nodes ── -->
+      <!-- rect: x=cx-18, y=cy-14, w=36, h=28, rx=2 -->
+
+      <!-- N1: Kirsty (slate tint, nominator) cx=85 cy=95 -->
+      <rect x="67" y="81" width="36" height="28" rx="2" fill="#e3eaf3" stroke="#1e3d5c" stroke-width="1.5"/>
+      <text x="85" y="92" text-anchor="middle" font-size="8" font-weight="700" fill="#1e3d5c" font-family="system-ui,sans-serif">K</text>
+      <text x="85" y="103" text-anchor="middle" font-size="7.5" fill="#4a6a8a" font-family="system-ui,sans-serif">Kirsty</text>
+
+      <!-- N2: Ben (neutral) cx=222 cy=55 -->
+      <rect x="204" y="41" width="36" height="28" rx="2" fill="#faf8f4" stroke="#9a9080" stroke-width="1.2"/>
+      <text x="222" y="52" text-anchor="middle" font-size="8" font-weight="700" fill="#4a4038" font-family="system-ui,sans-serif">B</text>
+      <text x="222" y="63" text-anchor="middle" font-size="7.5" fill="#7a7068" font-family="system-ui,sans-serif">Ben</text>
+
+      <!-- N3: Nilesy (slate tint, nominator) cx=378 cy=55 -->
+      <rect x="360" y="41" width="36" height="28" rx="2" fill="#e3eaf3" stroke="#1e3d5c" stroke-width="1.5"/>
+      <text x="378" y="52" text-anchor="middle" font-size="8" font-weight="700" fill="#1e3d5c" font-family="system-ui,sans-serif">N</text>
+      <text x="378" y="63" text-anchor="middle" font-size="7.5" fill="#4a6a8a" font-family="system-ui,sans-serif">Nilesy</text>
+
+      <!-- N4: Duncan (burgundy, executed) cx=535 cy=95 -->
+      <rect x="517" y="81" width="36" height="28" rx="2" fill="#f0e5e5" stroke="#7d1a1a" stroke-width="2"/>
+      <text x="535" y="92" text-anchor="middle" font-size="8" font-weight="700" fill="#7d1a1a" font-family="system-ui,sans-serif">D</text>
+      <text x="535" y="103" text-anchor="middle" font-size="7.5" fill="#9a4040" font-family="system-ui,sans-serif">Duncan</text>
+
+      <!-- N5: Rythian (neutral) cx=145 cy=192 -->
+      <rect x="127" y="178" width="36" height="28" rx="2" fill="#faf8f4" stroke="#9a9080" stroke-width="1.2"/>
+      <text x="145" y="189" text-anchor="middle" font-size="8" font-weight="700" fill="#4a4038" font-family="system-ui,sans-serif">R</text>
+      <text x="145" y="200" text-anchor="middle" font-size="7.5" fill="#7a7068" font-family="system-ui,sans-serif">Rythian</text>
+
+      <!-- N6: Sophie (gold tint, self-nom) cx=292 cy=195 -->
+      <rect x="274" y="181" width="36" height="28" rx="2" fill="#f5f0e4" stroke="#7a5c1e" stroke-width="1.5"/>
+      <text x="292" y="192" text-anchor="middle" font-size="8" font-weight="700" fill="#7a5c1e" font-family="system-ui,sans-serif">S</text>
+      <text x="292" y="203" text-anchor="middle" font-size="7.5" fill="#8a6830" font-family="system-ui,sans-serif">Sophie</text>
+
+      <!-- N7: Zoey (neutral, nominated not executed) cx=438 cy=195 -->
+      <rect x="420" y="181" width="36" height="28" rx="2" fill="#faf8f4" stroke="#9a9080" stroke-width="1.2"/>
+      <text x="438" y="192" text-anchor="middle" font-size="8" font-weight="700" fill="#4a4038" font-family="system-ui,sans-serif">Z</text>
+      <text x="438" y="203" text-anchor="middle" font-size="7.5" fill="#7a7068" font-family="system-ui,sans-serif">Zoey</text>
+
+      <!-- ── execution outcome badge ── -->
+      <rect x="562" y="66" width="72" height="18" rx="2" fill="#f0e5e5" stroke="#7d1a1a" stroke-width="1"/>
+      <text x="598" y="79" text-anchor="middle" font-size="8" font-weight="700" letter-spacing="0.06em" fill="#7d1a1a" font-family="system-ui,sans-serif">EXECUTED</text>
+      <!-- leader line from badge to Duncan node -->
+      <line x1="562" y1="74" x2="553" y2="83" stroke="#7d1a1a" stroke-width="0.8" opacity="0.45"/>
+
+      <!-- ── metadata annotation pills (hidden on mobile) ── -->
+      <g class="hg-meta" font-family="system-ui,sans-serif" font-size="8" fill="#7a7068">
+
+        <!-- "transcript" near Kirsty→Duncan arc midpoint -->
+        <rect x="274" y="136" width="52" height="14" rx="5" fill="#faf8f4" stroke="#ccc5b6" stroke-width="0.8"/>
+        <text x="300" y="146.5" text-anchor="middle">transcript</text>
+
+        <!-- "fused" near Nilesy→Duncan edge -->
+        <rect x="448" y="64" width="28" height="14" rx="5" fill="#faf8f4" stroke="#ccc5b6" stroke-width="0.8"/>
+        <text x="462" y="74.5" text-anchor="middle">fused</text>
+
+        <!-- "conf 0.91" near same edge, below -->
+        <rect x="444" y="81" width="44" height="14" rx="5" fill="#faf8f4" stroke="#ccc5b6" stroke-width="0.8"/>
+        <text x="466" y="91.5" text-anchor="middle">conf 0.91</text>
+
+        <!-- "claimed: Farmer" below Duncan -->
+        <rect x="503" y="116" width="72" height="14" rx="5" fill="#faf8f4" stroke="#ccc5b6" stroke-width="0.8"/>
+        <text x="539" y="126.5" text-anchor="middle">claimed: Farmer</text>
+
+        <!-- "self-nom" label for Sophie loop -->
+        <rect x="263" y="158" width="40" height="14" rx="5" fill="#f5f0e4" stroke="#c4aa78" stroke-width="0.8"/>
+        <text x="283" y="168.5" text-anchor="middle" fill="#7a5c1e">self-nom</text>
+
+        <!-- "no execution" near Zoey -->
+        <rect x="421" y="216" width="66" height="14" rx="5" fill="#faf8f4" stroke="#ccc5b6" stroke-width="0.8"/>
+        <text x="454" y="226.5" text-anchor="middle">no execution</text>
+
+      </g>
+
+      <!-- v2 badge (top-right) -->
+      <rect x="650" y="10" width="36" height="16" rx="2" fill="#e3eaf3" stroke="#1e3d5c" stroke-width="1"/>
+      <text x="668" y="22" text-anchor="middle" font-size="8.5" font-weight="700" fill="#1e3d5c" font-family="system-ui,sans-serif">v 2.0</text>
+
+    </svg>
+  </div>
 
   <div class="wins-board" id="wins-board"></div>
   <div class="wins-bar-wrap" id="wins-bar-wrap">
