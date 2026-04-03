@@ -1,6 +1,147 @@
-# BotC_yog
+# Yogs Data - Blood on the Clocktower
 
-Automated pipeline for downloading, transcribing, diarizing, and analysing Yogscast Blood on the Clocktower (BotC) YouTube videos.
+BotC_yog is a behavioral analytics project built on Yogscast Blood on the Clocktower games.
+
+The goal is not perfect full-game reconstruction. The goal is to extract enough trustworthy structure from transcripts, overlays, and game context to analyze how social deduction actually plays out: who applies pressure, who gets nominated, who is executed, what players publicly claim, and how those signals relate to outcomes.
+
+## What this project does
+
+This pipeline turns long-form BotC videos into analysis-ready artifacts that describe key public game events and player behavior.
+
+Today, the project can:
+
+* detect broad game structure such as intro, night, and day
+* segment day-phase context into more useful discussion windows
+* track player status and death events
+* extract execution-related context
+* build execution episodes
+* attach claimed-role context to executions
+* summarize claimed-role outcomes
+* extract nomination events
+* link nominations to execution episodes
+* build the first analysis-facing mart for nomination and execution outcomes
+
+In plain English, the repo now supports analysis of public pressure, nominations, executions, and claims well enough to start asking real questions across a corpus of games.
+
+## Current analytical focus
+
+The current north star is social deduction behavior, especially:
+
+* who nominates whom
+* who gets nominated repeatedly
+* who becomes the likely execution target
+* how nomination pressure differs from execution pressure
+* whether public claims appear to attract or reduce pressure
+* how often nominated players are actually executed
+
+This project is intentionally focused on analytics, not on perfectly reconstructing every hidden game mechanic or private interaction.
+
+## Pipeline overview
+
+The pipeline currently has several major layers:
+
+### Structural context
+
+These steps establish broad game flow and context windows so later extraction happens in the right part of the game.
+
+* phase labeling
+* day-event modeling
+* context segment generation
+
+### Player and execution context
+
+These steps establish who is alive, who dies, and what execution pressure looks like.
+
+* player status tracking
+* death-event tracking
+* execution-context extraction
+* execution-episode construction
+* execution claim-context enrichment
+* claimed role outcome summaries
+
+### Nomination and pressure analytics
+
+These steps add explicit public nomination behavior and connect it to executions.
+
+* nomination event extraction
+* execution-to-nomination linking
+* nomination-execution outcome mart
+
+## What is working well
+
+The project is now strong enough to support early cross-video analysis of nominations and executions.
+
+Recent work has improved:
+
+* nomination extraction from transcript and contextual evidence
+* linking nominations to execution episodes
+* player identity resolution through alias cleanup
+* self-nomination handling
+* source-of-truth cleanup for roster and player resolution inputs
+
+That means the project is no longer just building infrastructure. It is beginning to produce real analysis-ready behavioral data.
+
+## Current limitations
+
+This is still an extraction-heavy analytics project, and some limits remain.
+
+Most importantly:
+
+* nomination coverage is partial, not complete
+* some vote windows have no recoverable nomination signal in the transcript
+* vote tallies are not yet extracted as a stable artifact
+* some videos still need manual curation for roster or speaker-link quality
+* night intent and rumor propagation are not yet fully modeled
+
+In other words, the project already supports useful nomination and execution analysis, but it does not yet capture the full social-information flow of the game.
+
+## Why this project matters
+
+Blood on the Clocktower is a rich social deduction environment with deception, persuasion, accusation, risk management, and public reasoning happening in real time.
+
+That makes it a good domain for analytics questions such as:
+
+* how pressure accumulates
+* how public claims affect trust
+* how nominations turn into executions
+* how often the loudest target is not the one who dies
+* how player behavior differs across roles, groups, or game states
+
+This repo is an attempt to move from anecdotal “that felt suspicious” conversation to structured, repeatable analysis.
+
+## What comes next
+
+The next phase is less about adding more extraction stages everywhere and more about converting the current pipeline into clearer analytical outputs.
+
+Near-term priorities:
+
+* strengthen the main analysis-facing marts
+* publish early player-level nomination and execution summaries
+* continue targeted manual curation where it materially improves coverage
+* expand from nomination/execution analytics into night intent and information-flow analysis
+
+## Status
+
+Current status: early analysis-ready.
+
+The core execution and nomination pipeline is now in place.
+The remaining work is mostly about improving coverage, curating difficult cases, and expanding into the next behavioral domains.
+
+## Repo philosophy
+
+A few principles guide this project:
+
+* prefer trustworthy partial structure over brittle full reconstruction
+* keep source-of-truth fixes upstream when possible
+* keep extraction logic conservative
+* keep ambiguity visible instead of hiding it
+* build artifacts that are useful for actual analysis, not just pipeline completion
+
+## Long-term vision
+
+The long-term goal is a reusable analytics framework for social deduction games that can answer questions about pressure, deception, claims, targeting, and survival over many games.
+
+This repo is the foundation for that work.
 
 ---
 
@@ -28,7 +169,7 @@ Install these before anything else:
 
 - **Python 3.10+**
 - **ffmpeg** — must be on your `PATH` (used for audio extraction and resampling)
-- **yt-dlp** — installed via `requirements_pipeline.txt`, but must also be available as a CLI command for member-only video auth
+- **yt-dlp** — installed via `requirements.txt`, but must also be available as a CLI command for member-only video auth
 - **Tesseract** or **easyocr** — optional, required for the `scrape` step
 - **CUDA-capable GPU** — optional but strongly recommended for the `diarize` step (NeMo is very slow on CPU)
 
@@ -42,11 +183,7 @@ Two separate virtual environments are used to avoid dependency conflicts between
 # Main pipeline (download, transcribe, merge, patch, scrape, analyze)
 python -m venv .venv
 .venv\Scripts\activate            # Windows
-pip install -r requirements_pipeline.txt
-
-# Web UI only (Streamlit apps)
-# Can share .venv above, or install separately:
-pip install -r requirements.txt
+pip install -r requirements.txt   # pipeline + UI + browser bridge
 
 # Diarization only (heavy GPU dependencies)
 python -m venv .venv_botc

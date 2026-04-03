@@ -1,7 +1,7 @@
 # BotC_yog — Pipeline DAG
 
-> **Last updated:** 2026-03-06 (N1/N2/N3 added feat/nlp-enrichment)
-> **State:** covers all scripts present as of commit `44b2d3d`; N1–N3 are optional post-processing nodes added in feat/nlp-enrichment
+> **Last updated:** 2026-03-19
+> **State:** covers all scripts present on `feat/player-status-tracking` as of 2026-03-19; N0–N8 are optional enrichment nodes; player-name normalization via `normalize_player()` added to `pipeline_utils.py`
 
 ---
 
@@ -16,6 +16,7 @@ The system has five layers:
 | **Curation** | `auto_assign_speakers.py`, `fix_rosters.py` | cross-video |
 | **Publish** | `build_db.py`, `generate_landing.py`, `deploy_pages.sh` | global |
 | **Validation** | `validate.py` | global, run after any phase |
+| **Enrichment** | N0–N8 optional nodes | per-video, non-blocking |
 
 Canonical state is stored in:
 - `playlist.json` — video registry + processing status + per-game flags (committed)
@@ -74,9 +75,13 @@ B+C ──► D. video.merge
          v
          E. video.patch      (optional but recommended)
          |
-         └─► [N2. speaker.day_boundary_detection] ← optional, writes phase_labels.csv
+         └─► [N2. speaker.day_boundary_detection] ← optional, writes phase_labels.csv + day_events.csv
+                   |
+                   └─► [N2b. context.segment_labelling]  ← optional, writes context_segments.csv
 
 A ──► F. video.scrape       (independent of B/C/D — reads video.mp4 directly)
+      |
+      └─► [N0. video.scan_frames]               ← optional, writes frame_scan rows to botc.db
 
 E+F ──► H. curation.auto_assign_speakers   (cross-video, reads E+F output)
          |
@@ -85,6 +90,16 @@ E+F ──► H. curation.auto_assign_speakers   (cross-video, reads E+F output)
 E/F+overrides ──► G. video.analyze
                    |
                    ├─► [N3. content.claim_propagation] ← optional, writes claims.csv + claim_graph.json
+                   |
+                   ├─► [N4. content.player_status_tracking] ← optional, reads context_segments.csv (N2b), writes player_status.csv + death_events.csv + night_target_events.csv
+                   |        |
+                   |        └─► [N5. content.execution_context] ← optional, reads context_segments.csv (N2b), writes execution_context_events.csv
+                   |                  |
+                   |                  └─► [N6. content.execution_episodes] ← optional, reads day_events.csv (N2) + execution_context_events.csv (N5), writes execution_episodes.csv
+                   |                             |
+                   |                             └─► [N7. content.execution_claim_context] ← optional, reads execution_episodes.csv (N6) + claims.csv (N3), writes execution_claim_context.csv
+                   |                                        |
+                   |                                        └─► [N8. content.claimed_role_outcomes] ← optional, reads execution_claim_context.csv (N7) + death_events.csv (N4) + claims.csv (N3), writes claimed_role_outcomes.csv
                    |
                    v
                    J. data.build_db       (cross-video, reads all G outputs)
@@ -98,7 +113,7 @@ E/F+overrides ──► G. video.analyze
                    (any phase) ──► M. validate.end_state
 ```
 
-**N1/N2/N3 are optional enrichment nodes.** They do not affect playlist.json status, do not block any existing step, and are not required by J (build_db). They write new artifact files alongside existing outputs.
+**N0/N1/N2/N2b/N3/N4/N5/N6/N7/N8 are optional enrichment nodes.** They do not affect playlist.json status, do not block any existing step, and are not required by J (build_db). N0 writes directly to `botc.db` (frame_scan table); N1–N8 and N2b write new artifact files alongside existing outputs.
 
 **Notes:**
 - `F. video.scrape` can run after `A. video.download` (only needs `video.mp4`).
@@ -120,33 +135,139 @@ E/F+overrides ──► G. video.analyze
 The pipeline distinguishes between **phases** (broad temporal regions of a game) and
 **events** (discrete occurrences within those regions).
 
-**Major phases** — produced by N2 (phase_detection / `detect_phases.py`):
+**Broad phases** — produced by N2 (phase_detection / `detect_phases.py`), written to `phase_labels.csv`:
 
 | Phase | Description |
 |-------|-------------|
 | `Intro` | Pre-game: players announce roles; Storyteller assigns night abilities |
 | `Night` | Players close eyes; Storyteller resolves night actions privately |
-| `Day` | Open discussion; players talk, share information, accuse |
-| `Nomination` | A player is nominated; the group votes on whether to execute |
-| `Execution` | Storyteller announces the execution outcome |
+| `Day` | All open discussion: group talk, nominations, voting, execution announcements |
 
-> **Design note:** `Town` is not a phase label in the code.  The open-discussion
-> period is labelled `Day`.  `Nomination` and `Execution` are sub-phases of what
-> a player would informally call "Town meeting."
+> **Design note:** `Nomination` and `Execution` are no longer top-level phases.
+> Everything visible to all players (group discussion, votes, ST announcements)
+> is labelled `Day`.  Fine-grained game events within Day are captured in
+> `day_events.csv` (see below).
 
-**Events inside phases** — produced by N3 (claim_extraction / `extract_claims.py`):
+**Day-scoped events** — also produced by N2, written to `day_events.csv`:
+
+| Event | Description | Primary evidence |
+|-------|-------------|-----------------|
+| `NominationStart` | Nominations open or a nomination is made | `frame_scan.votes_visible` (conf 1.0) or ST keyword (conf 0.9) or player keyword (conf 0.6) |
+| `VoteSequence` | The full voting window for a nomination | `frame_scan.votes_visible` window start→end |
+| `ExecutionAnnouncement` | ST announces execution outcome (death or pardon) | Keyword regex in ST speech |
+| `StorytellerInterruption` | ST speaks 1:1 with a player mid-Day (structural signal) | 2-speaker window during Day phase |
+| `DayEnd` | Day→Night boundary (derived from phase transition) | Phase label boundary |
+
+**Claim events** — produced by N3 (claim_extraction / `extract_claims.py`):
 
 | Event | Typical phase | Description |
 |-------|--------------|-------------|
-| `nomination` | Nomination | A player nominates another for execution |
-| `vote` | Nomination | A player casts a yes/no vote |
-| `execution` | Execution | ST announces result; player dies or survives |
-| `death` | Night / Execution | A player is removed from the game |
 | `role_claim` | Day / Night | A player claims (or implies) a role |
-| `accusation` | Day / Nomination | A player accuses another of being Evil |
+| `accusation` | Day | A player accuses another of being Evil |
+| `suspicion` | Day | A player expresses suspicion about another |
+| `agreement` | Day | A player supports another's claim or accusation |
+| `challenge` | Day | A player disputes a claim |
 
 Phase labels from N2 are consumed by N3 to provide temporal context for event
-extraction (e.g. a role claim in Day has different weight than one at Night).
+extraction (e.g. a role claim during a Night phase has different weight than
+one during Day).
+
+**Death events** — produced by N4 (player_status_tracking / `extract_player_status.py`):
+
+| Status / Event | Description |
+|---------------|-------------|
+| `alive` | Player is alive (initial state from intro_roster; also transitions back from unknown) |
+| `dead` | Player has died (from execution, night kill, or uncertain cause) |
+| `unknown` | Status cannot be determined from available signals |
+| `execution` | Death by nomination vote (associated with a preceding VoteSequence day event) |
+| `night_death` | Death by night action (demon kill, poisoner, etc.) |
+| `uncertain_death` | Death confirmed but cause not classifiable from signals |
+
+N4 consumes phase_labels (N2) and context_segments (N2b) for temporal context and cause
+classification. Visual corroboration from frame_scan (N0) provides a confidence boost
+when the header bar is visible at the time of the death signal.
+Conservative policy: false negatives preferred over false positives — only
+emit a death event when confidence ≥ 0.45.
+
+**Public execution events** — produced by N5 (execution_context / `extract_execution_context.py`):
+
+| Event Type | Description |
+|------------|-------------|
+| `public_kill_pressure` | Player explicitly pushed for another player's execution ("we should kill X", "vote for X", "X should die") |
+| `nomination_reference` | Player explicitly nominated another by name ("I nominate X", "nominating X") |
+| `execution_result_narration` | ST (or confirmed narrator) announcing execution outcome ("Goodbye X", "X was executed", "X, last words") |
+| `execution_opposition` | Speaker defending a player against execution push ("don't kill X", "X is innocent") |
+
+N5 consumes context_segments (N2b) to gate patterns strictly to public Day context
+(`public_day_discussion` or `execution_window` audience_scope). This prevents "kill X"
+language in private Night or StorytellerInterruption segments (where a demon selects
+their night target) from leaking into public execution-pressure records. N4 captures
+private kill intent; N5 captures public execution pressure — the two are disjoint.
+Conservative policy: false negatives preferred — `_MIN_CONF = 0.60` (higher than N4's
+0.45, reflecting noisier public-day language).
+
+**Execution episodes** — produced by N6 (execution_episodes / `build_execution_episodes.py`):
+
+| Field | Description |
+|-------|-------------|
+| `likely_target_player` | Inferred from nomination_reference and public_kill_pressure signals in a ±300 s window around the vote; blank if ambiguous |
+| `execution_result_player` | From execution_result_narration after the vote window (up to +300 s); independent of inferred target |
+| `nomination_speakers` | Players who made nomination_reference events in the episode window |
+| `pressure_speakers` | Players who applied public_kill_pressure in the episode window |
+| `opposition_speakers` | Players who defended the target against execution |
+| `confidence` | Aggregated from VoteSequence confidence + nomination/pressure/result evidence |
+
+N6 produces one row per Day-phase VoteSequence event, aggregating N5 public signals
+and N2 vote windows into a single inspectable artifact per execution episode.
+`likely_target_player` and `execution_result_player` are stored separately:
+one is inferred from pre-vote town discussion, the other confirmed from result narration.
+These can differ (town pushes player A but executes player B via a different nomination),
+which is meaningful game data. Conservative: target is left blank when evidence is
+ambiguous (competing candidates within _AMBIGUITY_RATIO=1.4 and _AMBIGUITY_GAP=0.20).
+
+**Execution claim context** — produced by N7 (execution_claim_context / `build_execution_claim_context.py`):
+
+| Field | Description |
+|-------|-------------|
+| `target_claimed_role` | The role the likely_target_player was publicly claiming near the vote; blank if no qualifying claim exists |
+| `result_claimed_role` | The role the execution_result_player was claiming when executed; blank if no qualifying claim exists |
+| `*_claim_confidence` | Confidence of the selected claim (from N3 claims.csv) |
+| `*_claim_type` | Event type of the selected claim (`role_claim`) |
+| `*_claim_text` | First 100 chars of the claim utterance (for inspection) |
+| `*_claim_source_timestamp` | When the claim was made (seconds from start) |
+| `*_claim_recency_s` | Seconds between claim and vote_window_start (staleness measure) |
+| `*_claim_stale` | `true` if recency > 5400 s — flag only; stale claims are still included |
+| `*_claim_match_status` | `lie` (verified_lie==true), `truthful` (claimed == actual), or `unverified` |
+| `*_claim_speaker` | Player who made the claim (always the player themselves for role_claim) |
+
+N7 joins each N6 episode row with N3 claims.csv using a conservative per-player lookup.
+Claim selection policy: most recent role_claim with confidence ≥ 0.35 before vote_window_end,
+sorted by confidence DESC → intro-phase tier → recency DESC. If no qualifying claim exists,
+all claim fields are left blank (false negative preferred over forced guess).
+target and result player claims are resolved independently.
+
+**Claimed-role outcomes** — produced by N8 (claimed_role_outcomes / `build_claimed_role_outcomes.py`):
+
+One row per player per video. Fields:
+
+| Field | Description |
+|-------|-------------|
+| `actual_role` / `alignment` | From intro_roster + roster_overrides; alignment via `botc_ui._team()` |
+| `winner` | Game outcome from `playlist.json` |
+| `survived` / `died` / `was_executed` | Derived from N4 death_events (absence = survived conservative) |
+| `death_type` / `death_timestamp` | From N4 (execution / night_death / uncertain_death) |
+| `first_claimed_role` / `last_claimed_role` | Earliest and highest-confidence N3 role claim (conf ≥ 0.35) |
+| `last_claim_confidence` / `last_claim_stale` | Confidence and staleness of last claim (stale if > 5400 s before death or game end) |
+| `claim_count` / `lied_about_role` | Total qualifying claims; any verified_lie in N3 |
+| `claimed_role_at_pressure` | From N7 target fields when player was likely_target_player |
+| `claimed_role_at_execution` | From N7 result fields when player was execution_result_player |
+| `target_claim_match_status` / `result_claim_match_status` | `lie`, `truthful`, or `unverified` |
+| `pressure_episode_count` / `targeted_in_n6` | N6 episodes where player was likely_target |
+| `execution_episode_count` / `executed_in_n6` | N6 episodes where player was execution_result |
+
+N8 is a pure aggregation layer: it joins N3, N4, N6, and N7 into one analysis-ready table per player per game.
+No new extraction is performed. Claims are not forced when evidence is absent.
+`pressure_episode_count` and `execution_episode_count` are kept separate — they represent distinct concepts (town discussion vs confirmed execution).
 
 ---
 
@@ -197,7 +318,7 @@ extraction (e.g. a role claim in Day has different weight than one at Night).
 | **Acceptance** | `whisper_segments.jsonl` is non-zero and contains valid JSONL |
 | **Downstream** | D |
 | **Prereqs** | `faster-whisper` installed; CUDA GPU recommended; model `medium` by default |
-| **Notes** | Windows: nvidia DLLs registered automatically before import. `vad_filter=True` removes silence. To bulk re-transcribe: `python retranscribe_all.py`. |
+| **Notes** | Windows: nvidia DLLs registered automatically before import. `vad_filter=True` removes silence. To bulk re-transcribe: `python batch_transcribe.py`. |
 
 ---
 
@@ -262,7 +383,8 @@ extraction (e.g. a role claim in Day has different weight than one at Night).
 | **Acceptance** | `intro_roster.json` exists, is valid JSON, `players` array is non-empty |
 | **Downstream** | G, H |
 | **Prereqs** | `easyocr` or `pytesseract` installed; OpenCV |
-| **Notes** | Known non-standard formats: `DAb9sq5ku2k` (Bonus format — DO NOT re-scrape), `tf_LO5NKKUU`, `HQlYPDUfM4Q` (badge thresholds don't match), `F2f0nNeoWQM` (MPEG-TS in MP4 breaks OpenCV seek). Blind games have no reliable overlay — empty result is expected. |
+| **Flags** | `--force` re-scrapes (skips `manual_entry` files); `--force-manual` also overwrites `manual_entry` files — use with caution |
+| **Notes** | OCR pipeline: left-panel-only rule; HSV masking for both blue (Good) and red (Evil) nameplates; tight nameplate blob selection (height ≥30% crop + leftmost); coverage check in fuzzy match; 4 s name-persistence window. Protected manual rosters: `tf_LO5NKKUU`, `HQlYPDUfM4Q` (`source: manual_entry`). Non-standard: `DAb9sq5ku2k` (Bonus format — DO NOT re-scrape). Blind games return empty result (expected). |
 
 ---
 
@@ -369,7 +491,7 @@ extraction (e.g. a role claim in Day has different weight than one at Night).
 | **Inputs** | `playlist.json`, `botc.db`, `outputs/*/` artifact files |
 | **Outputs** | Console report; exit code 0 (pass/warn) or 1 (fail / --strict) |
 | **Command** | `python validate.py` \| `python validate.py --strict` \| `python validate.py --json` |
-| **Checks (27)** | prerequisites, DB schema/counts, role normalization, playlist sync, per-video artifacts, unlinked speakers, winner coverage, ghost dirs, pending processable, partial downloads, UI source, duplicate role sets |
+| **Checks (28)** | prerequisites, DB schema/counts, role normalization, playlist sync, per-video artifacts, unlinked speakers, winner coverage, ghost dirs, pending processable, partial downloads, UI source, duplicate role sets, enrichment artifact coverage |
 | **Pass/Warn/Fail** | PASS = check clean. WARN = data gap or manual action needed (non-blocking). FAIL = structural/code error (blocking). INFO = expected/acceptable state (blind games, optional files). |
 
 ---
@@ -427,8 +549,32 @@ bash scripts/run_all.sh
 | Intro roster (OCR) | `outputs/<id>/intro_roster.json` | No (gitignored) | Via step F (may need manual fix) |
 | Speaker overrides | `outputs/<id>/roster_overrides.json` | No (gitignored) | Via steps H+I |
 | Lie analysis | `outputs/<id>/lie_analysis.csv` | No (gitignored) | Via step G |
+| Player status (N4) | `outputs/<id>/player_status.csv` | No (gitignored) | Via N4 (`extract_player_status.py`) |
+| Death events (N4) | `outputs/<id>/death_events.csv` | No (gitignored) | Via N4 (`extract_player_status.py`) |
+| Night target events (N4) | `outputs/<id>/night_target_events.csv` | No (gitignored) | Via N4 (`extract_player_status.py`) |
+| Context segments (N2b) | `outputs/<id>/context_segments.csv` | No (gitignored) | Via N2b (`generate_context_segments.py`) |
+| Execution context events (N5) | `outputs/<id>/execution_context_events.csv` | No (gitignored) | Via N5 (`extract_execution_context.py`) |
+| Execution episodes (N6) | `outputs/<id>/execution_episodes.csv` | No (gitignored) | Via N6 (`build_execution_episodes.py`) |
+| Execution claim context (N7) | `outputs/<id>/execution_claim_context.csv` | No (gitignored) | Via N7 (`build_execution_claim_context.py`) |
+| Claimed role outcomes (N8) | `outputs/<id>/claimed_role_outcomes.csv` | No (gitignored) | Via N8 (`build_claimed_role_outcomes.py`) |
 | Landing page HTML | `landing.html` | No (gitignored) | Via step L |
 | Live landing page | `gh-pages:index.html` | Yes (separate branch) | Via `deploy_pages.sh` |
+
+---
+
+## N0. video.scan_frames  [optional enrichment]
+
+| Field | Value |
+|-------|-------|
+| **Purpose** | Extract visual game-phase signals from video frames using HSV colour thresholding; writes results to `botc.db` `frame_scan` table |
+| **Script** | `scan_frames.py` |
+| **Per-video?** | Yes |
+| **Slot** | After A (download) — reads `video.mp4` directly |
+| **Inputs** | `outputs/<id>/video.mp4` |
+| **Outputs** | Rows in `botc.db`.`frame_scan` (timestamp, signal_type, confidence) |
+| **Command** | `python scan_frames.py <video_id>` |
+| **Acceptance** | `frame_scan` rows present for video; no errors |
+| **Notes** | Detects two persistent UI elements (scoreboard, town-square background) via normalised crop regions (resolution-independent). Non-destructive: existing outputs untouched. Coverage: 48/53 processable videos. |
 
 ---
 
@@ -452,15 +598,32 @@ bash scripts/run_all.sh
 
 | Field | Value |
 |-------|-------|
-| **Purpose** | Label each segment with its game phase (Intro / Night / Day / Nomination / Execution) using keyword heuristics and speaker patterns |
+| **Purpose** | Label each segment with its broad game phase (Intro / Night / Day) and detect day-scoped events (nominations, votes, executions) |
 | **Script** | `detect_phases.py` |
 | **Per-video?** | Yes |
 | **Slot** | After E (patch) — reads `segments_patched.csv` |
-| **Inputs** | `segments_patched.csv` (fallback: `segments_consistent.csv`, `segments.csv`) |
-| **Outputs** | `outputs/<id>/phase_labels.csv` (columns: start, end, phase, confidence, evidence) |
+| **Inputs** | `segments_patched.csv` (fallback: `segments_consistent.csv`, `segments.csv`); `frame_scan` rows from `botc.db` (optional, for high-confidence event anchors) |
+| **Outputs** | `outputs/<id>/phase_labels.csv` (columns: start, end, phase, round, confidence, evidence); `outputs/<id>/day_events.csv` (columns: start, end, round, event, confidence, evidence) |
 | **Command** | `python detect_phases.py <video_id>` |
-| **Acceptance** | `phase_labels.csv` exists, rows cover full episode duration, phase column is one of the known values |
-| **Notes** | Purely text-based; no audio features. Storyteller speaker auto-detected by dominant intro presence. Low-confidence regions labelled `Unknown` then forward-filled. `--force` flag to overwrite. |
+| **Acceptance** | `phase_labels.csv` exists, rows cover full episode duration, `phase` column is one of `{Intro, Night, Day, Unknown}`; `day_events.csv` exists (may be empty if no nominations detected) |
+| **Notes** | Purely text-based + speaker-count structural signals; no raw audio features. Storyteller auto-detected by word-count dominance in first 330 s. Low-confidence regions labelled `Unknown` then forward-filled. Structural triggers: ST+1-player 2-speaker window → Night evidence; ≥2 non-ST speakers → Day evidence. `--force` flag to overwrite. Legacy `phase_labels.csv` files containing `Nomination`/`Execution` produce a WARN in `validate.py` — re-run N2 to upgrade. |
+
+---
+
+## N2b. context.segment_labelling  [optional enrichment]
+
+| Field | Value |
+|-------|-------|
+| **Purpose** | Synthesize fine-grained interpretation context for each time interval; bridge N2 phase labels and N4 death/target extraction; make interpretive decisions explicit and inspectable |
+| **Script** | `generate_context_segments.py` |
+| **Per-video?** | Yes |
+| **Slot** | After N2 (phase_detection) — reads `phase_labels.csv` + `day_events.csv` |
+| **Inputs** | `outputs/<id>/phase_labels.csv` (N2, required); `outputs/<id>/day_events.csv` (N2, optional) |
+| **Outputs** | `outputs/<id>/context_segments.csv` — one row per time interval (columns: timestamp_start, timestamp_end, broad_phase, context_mode, speaker_type, audience_scope, confidence, source) |
+| **Command** | `python generate_context_segments.py <video_id>` \| `python generate_context_segments.py --all` |
+| **Acceptance** | `context_segments.csv` exists; rows cover full video duration from phase_labels; `context_mode` values are one of the documented set |
+| **Downstream** | N4 (`extract_player_status.py`) — consumes for night-target scope and confidence adjustments |
+| **Notes** | Non-destructive: no other artifacts touched. Absence does not break N4 — N4 falls back to raw `_phase_at()` lookup. Context modes: `intro_meta`, `night_private_action`, `storyteller_narration`, `morning_result_announcement`, `public_day_discussion`, `execution_window`, `ambiguous`. Day phases are sub-divided by VoteSequence and StorytellerInterruption events. Morning window (first 600 s of a Day following a Night) labelled `morning_result_announcement`. Contract: `docs/context_contract.md`. |
 
 ---
 
@@ -480,32 +643,123 @@ bash scripts/run_all.sh
 
 ---
 
+## N4. content.player_status_tracking  [optional enrichment]
+
+| Field | Value |
+|-------|-------|
+| **Purpose** | Detect player deaths from transcript + visual signals; emit per-player status transitions and classified death events |
+| **Script** | `extract_player_status.py` |
+| **Per-video?** | Yes |
+| **Slot** | After G (analyze) — reads roster data, segments, and optional N2 phase labels + N0 frame scan |
+| **Inputs** | `segments_patched.csv` (fallback: `segments.csv`), `intro_roster.json`, `roster_overrides.json` (optional), `phase_labels.csv` (N2, optional), `day_events.csv` (N2, optional), `context_segments.csv` (N2b, optional), `frame_scan` rows from `botc.db` (N0, optional) |
+| **Outputs** | `outputs/<id>/player_status.csv` (per-player status transitions), `outputs/<id>/death_events.csv` (one row per death), `outputs/<id>/night_target_events.csv` (one row per intended kill target), `outputs/<id>/name_resolution_debug.csv` (optional — emitted when ≥1 variant found) |
+| **Command** | `python extract_player_status.py <video_id>` \| `python extract_player_status.py --all` |
+| **Acceptance** | Both CSVs exist; `death_events.csv` `event_type` column contains only `{execution, night_death, uncertain_death}`; no rows with confidence below threshold |
+| **Notes** | Signal priority: visual (frame_scan `header_visible`) > ST transcript > general transcript. Storyteller detected as highest word-count speaker in first 330 s (mirrors N2). ST excluded from self-declaration path. Conservative: `_MIN_CONF=0.45`; prefers false negatives. Death cause classification uses N2 VoteSequence lookback (120 s) and Day-phase start window (600 s). `--force` flag to overwrite existing output. **Transcript name normalization** (added 2026-03-15): per-video ASR variant discovery — alias variants from `player_aliases.json` and fuzzy variants (difflib `SequenceMatcher`, threshold 0.78, min length 5 chars for both token and player key) are added as regex patterns at `_VARIANT_CONF_SCALE=0.95`. Possessives and short-name ambiguities are filtered. Self-declaration false positives suppressed via 60 s reaction window. Short player names (≤4 chars) use alias-only matching. **Night target events** (added 2026-03-15): kill-intent patterns detected during Night phase are recorded separately from confirmed deaths in `night_target_events.csv`. Fields include `source_speaker`, `target_player`, `evidence_type` (`named_intent` or `split_intent`), `candidate_actor_alignment` (Evil/Good/unknown from per-video roster), and `outcome_relation` (`matched_actual_death` / `did_not_match_actual_death` / `no_confirmed_death` / `unknown`). An intended target NEVER creates a confirmed death by itself. This enables "targeting behaviour" analysis (project charter). **Reconciliation policy** (tightened 2026-03-18): intended-target records are only linked to confirmed deaths if (a) the death is a `night_death` event (not an execution) and (b) it falls within 600 s of the targeting event. Executions are never linked. No mechanic (protection / redirect / bounce) is inferred from target ≠ victim — `did_not_match_actual_death` only asserts that the target survived and a different night-kill occurred in the same window. |
+
+---
+
+## N5. content.execution_context  [optional enrichment]
+
+| Field | Value |
+|-------|-------|
+| **Purpose** | Extract public kill pressure, nomination references, and execution-result narration from the game transcript, gated strictly to public Day context via the context layer (N2b) |
+| **Script** | `extract_execution_context.py` |
+| **Per-video?** | Yes |
+| **Slot** | After G (analyze) and N2b (context labelling) — reads `segments_patched.csv` + `context_segments.csv` |
+| **Inputs** | `segments_patched.csv` (fallback: `segments_consistent.csv`, `segments.csv`), `intro_roster.json`, `roster_overrides.json` (optional), `phase_labels.csv` (N2, optional), `context_segments.csv` (N2b, optional) |
+| **Outputs** | `outputs/<id>/execution_context_events.csv` — one row per execution-context event (columns: timestamp_start, speaker, source_player_name, target_player, target_role_if_any, event_type, confidence, context_mode, phase, source_text) |
+| **Command** | `python extract_execution_context.py <video_id>` \| `python extract_execution_context.py --all` |
+| **Acceptance** | `execution_context_events.csv` exists (empty CSV with header is valid if no qualifying events); `event_type` column contains only `{public_kill_pressure, nomination_reference, execution_result_narration, execution_opposition}`; no events in private_like context |
+| **Downstream** | Future vote-reconstruction and nomination-graph analytics (not yet implemented) |
+| **Notes** | **Context gate (strict):** `public_kill_pressure`, `nomination_reference`, and `execution_opposition` fire ONLY when `audience_scope == "public"` AND `phase == "Day"` AND `context_mode in {public_day_discussion, execution_window}`. This prevents Night-phase and StorytellerInterruption private-like segments from producing day-pressure events. `execution_result_narration` fires in any Day context and is boosted when spoken by the Storyteller speaker AND in `execution_window` or `morning_result_announcement` context. **N4/N5 disjoint guarantee:** N4 captures private kill intent (Night + private_like); N5 captures public execution pressure (public Day only) — the audience_scope gate in context_segments.csv is the enforcing boundary. Conservative: `_MIN_CONF = 0.60`. Same alias + fuzzy name-variant discovery as N4 (`_FUZZY_NAME_THRESHOLD = 0.78`). Deduplication: same (speaker, target_player, event_type) within 30 s → keep highest confidence. `--force` flag to overwrite existing output. **Batch run across 47 videos:** 245 total events (nomination_reference=114, public_kill_pressure=113, execution_result_narration=9, execution_opposition=9). |
+
+---
+
+## N6. content.execution_episodes  [optional enrichment]
+
+| Field | Value |
+|-------|-------|
+| **Purpose** | Aggregate N2 VoteSequence windows and N5 execution-context events into one row per execution episode; describe likely target, who drove the conversation, and whether result narration confirms the executed player |
+| **Script** | `build_execution_episodes.py` |
+| **Per-video?** | Yes |
+| **Slot** | After N5 (execution context) — reads `execution_context_events.csv` + `day_events.csv` |
+| **Inputs** | `day_events.csv` (N2, required), `execution_context_events.csv` (N5, optional), `phase_labels.csv` (N2, optional — used for Night-phase filtering), `intro_roster.json`, `roster_overrides.json` (optional) |
+| **Outputs** | `outputs/<id>/execution_episodes.csv` — one row per Day-phase VoteSequence event (columns: timestamp_start, timestamp_end, phase, round, vote_window_start, vote_window_end, likely_target_player, likely_target_role_if_any, evidence_count, supporting_event_types, confidence, nomination_speakers, pressure_speakers, opposition_speakers, execution_result_player, matched_vote_sequence, source_timestamps) |
+| **Command** | `python build_execution_episodes.py <video_id>` \| `python build_execution_episodes.py --all` |
+| **Acceptance** | `execution_episodes.csv` exists; one row per Day-phase VoteSequence; `likely_target_player` blank when evidence is ambiguous or absent; `execution_result_player` independent of inferred target |
+| **Downstream** | Future vote-reconstruction, execution-strategy analysis, claimed-role-at-execution dataset |
+| **Notes** | **Conservative scoring:** candidate target scored from pre-vote N5 events using weighted sum (`nomination × 1.0`, `kill_pressure × 0.7`, `opposition × 0.3`). Target resolved only if top candidate exceeds second by ratio ≥ 1.4 AND gap ≥ 0.20 — otherwise `likely_target_player = ""`. **Night-phase filtering:** VoteSequences where both start and end fall in Night are excluded (frame-scan misdetections); VoteSequences that straddle Night→Day boundaries are included if either endpoint falls in Day. **Lookback:** 300 s before vote window start for nomination/pressure evidence. **Result lookahead:** 300 s after vote window end for execution_result_narration confirmation. `likely_target_player` and `execution_result_player` are stored separately — they can differ (town discusses one target but executes another via a different nomination); this divergence is real game signal. Episodes with zero N5 evidence are still emitted (conf ≈ 0.40) so vote coverage is always visible. **Batch results (47 videos):** 311 episodes — resolved targets: 97/311 (31%); result confirmed: 9/311; confirmed matches (target == result): 1/311. |
+
+---
+
+## N7. content.execution_claim_context  [optional enrichment]
+
+| Field | Value |
+|-------|-------|
+| **Purpose** | Join N6 execution episodes with N3 role claims to describe what role each player was publicly claiming near the time they were nominated or executed |
+| **Script** | `build_execution_claim_context.py` |
+| **Per-video?** | Yes |
+| **Slot** | After N6 (execution_episodes) and N3 (claim_extraction) — reads `execution_episodes.csv` + `claims.csv` |
+| **Inputs** | `execution_episodes.csv` (N6, required), `claims.csv` (N3, optional — all claim fields blank if absent) |
+| **Outputs** | `outputs/<id>/execution_claim_context.csv` — one row per execution episode (all N6 episode fields plus target/result claim fields; see Game Phases section above) |
+| **Command** | `python build_execution_claim_context.py <video_id>` \| `python build_execution_claim_context.py --all` |
+| **Acceptance** | `execution_claim_context.csv` exists with one row per N6 episode; blank claim fields when no qualifying claim found (not a failure); `target_claim_match_status` and `result_claim_match_status` contain only `{lie, truthful, unverified, ""}` |
+| **Notes** | **Claim selection:** `event_type == role_claim`, `confidence >= 0.35` (`_CLAIM_MIN_CONF`), `timestamp_seconds <= vote_window_end`. Sort priority: confidence DESC → intro-phase tier DESC → recency DESC. This prioritises explicit hard claims (conf 0.85) over garbled N3 fragments (conf 0.425), and Intro-phase reveals over in-game declarations. **Staleness:** `claim_recency_s = vote_window_start - claim_timestamp`. Claims older than 5400 s (`_CLAIM_STALE_S`) are flagged `claim_stale=true` but still included — the consumer decides whether to filter them. **False-negative policy:** blank is always preferred over a forced guess. No claim interpolation, no belief-state reconstruction. **Player matching:** exact case-insensitive match on `player_name` from claims.csv — videos with incomplete roster linking (e.g. `speaker_0`/`speaker_1` as player_name) produce zero resolved claims; this is expected conservative behaviour. **Batch results (47 videos):** 311 episodes, target_claimed_role resolved: 52/311 (17%), result_claimed_role resolved: 3/311 (1%), lies detected: 17 episodes. |
+
+---
+
+## N8. content.claimed_role_outcomes  [optional enrichment]
+
+| Field | Value |
+|-------|-------|
+| **Purpose** | One row per player per video — analysis-ready summary of claimed role, actual role, survival, execution, and pressure outcomes. Directly answers charter questions: go-to claimed role to die/survive, which claimed roles attract execution pressure, claimed vs actual role comparison. |
+| **Script** | `build_claimed_role_outcomes.py` |
+| **Per-video?** | Yes |
+| **Slot** | After N4, N6, N7 — reads `death_events.csv` + `claims.csv` + `execution_episodes.csv` + `execution_claim_context.csv` |
+| **Inputs** | `execution_claim_context.csv` (N7, optional), `execution_episodes.csv` (N6, optional), `claims.csv` (N3, optional), `death_events.csv` (N4, optional), `intro_roster.json` + `roster_overrides.json` (required for roster), `playlist.json` (winner + duration) |
+| **Outputs** | `outputs/<id>/claimed_role_outcomes.csv` — one row per player (see Game Phases section above for full field list) |
+| **Command** | `python build_claimed_role_outcomes.py <video_id>` \| `python build_claimed_role_outcomes.py --all` |
+| **Acceptance** | `claimed_role_outcomes.csv` exists with one row per player; blank claim fields when no qualifying claim found; `was_executed` and `targeted_in_n6` fields are independent; alignment via `botc_ui._team()` only |
+| **Notes** | **Claim selection:** `last_claimed_role` = highest-confidence role_claim (conf ≥ 0.35), tie-break most recent. `first_claimed_role` = earliest qualifying claim. `claimed_role_at_pressure` and `claimed_role_at_execution` are sourced from N7 — if N7 left them blank, they stay blank here. **Staleness:** `last_claim_stale = "true"` if the last claim was made more than 5400 s before the player's death (or game end if they survived). **Alignment:** always via `botc_ui._team()` — never hardcoded. **Conservative:** blanks preferred over forced guesses; `lied_about_role` only set when N3 explicitly marks `verified_lie=true`. **Batch results (47 videos):** 340 player rows; liars flagged across 30+ videos; pressure and execution counts populated from N6 for all videos with execution_episodes.csv. |
+
+---
+
 ## Scripts Not in the DAG (Support / Utility)
 
 | Script | Role |
 |--------|------|
 | `calibrate_scraper.py` | Visual tuning tool for OCR crop regions in `scrape_intro.py` |
-| `retranscribe_all.py` | Bulk re-transcribe all eligible videos (e.g. after model upgrade) |
+| `compare_rosters.py` | Diffs DB roster against the episode spreadsheet; fuzzy title matching |
+| `batch_transcribe.py` | Bulk re-transcribe all eligible videos (e.g. after model upgrade); use `retranscribe_all` flag |
+| `batch_transcribe.py` | Batch orchestration for retranscription runs with progress tracking |
+| `batch_downstream.py` | Batch orchestration for downstream (merge/patch/analyze) processing |
 | `explore.py` | Full Streamlit editor (read/write) — local only |
 | `explore_public.py` | Read-only Streamlit viewer — public-facing analysis UI |
 | `validate.py` | End-state validator — run after any pipeline phase |
 | `speaker_consistency.py` | N1 optional enrichment: smooths diarization fragmentation |
 | `detect_phases.py` | N2 optional enrichment: game-phase boundary detection |
+| `generate_context_segments.py` | N2b optional enrichment: context labelling from N2 outputs → `context_segments.csv` |
 | `extract_claims.py` | N3 optional enrichment: role-claim / accusation / suspicion extraction |
+| `extract_player_status.py` | N4 optional enrichment: player death / status tracking |
+| `extract_execution_context.py` | N5 optional enrichment: public execution-context event extraction → `execution_context_events.csv` |
+| `build_execution_episodes.py` | N6 optional enrichment: execution-episode aggregation from N2 vote windows + N5 events → `execution_episodes.csv` |
+| `build_execution_claim_context.py` | N7 optional enrichment: claimed-role-at-execution join from N6 episodes + N3 claims → `execution_claim_context.csv` |
+| `build_claimed_role_outcomes.py` | N8 optional enrichment: analysis-ready claimed-role outcomes (one row per player per video) → `claimed_role_outcomes.csv` |
 
 ---
 
-## Known Data Gaps (as of 2026-03-06)
+## Known Data Gaps (as of 2026-03-14)
 
 | Video ID | Issue | Type | Path Forward |
 |----------|-------|------|-------------|
-| `DbF9CPOueTI` | Never processed | data | `python run_pipeline.py DbF9CPOueTI` |
-| `z79AJOPoNi4` | `audio.webm` present but no `audio.wav` — conversion interrupted | data | Re-run download with cookies: `python run_pipeline.py z79AJOPoNi4 --steps download --force` |
 | `0wGTes2sqmE` | 2 unlinked speakers; winner missing | manual | Watch video; set winner in `playlist.json`; run `fix_rosters.py` |
-| `ggM9BH__xtU` | Blind game; winner unknown | manual | Watch video; set winner in `playlist.json` |
-| `DzTk6kSIg-M` | 4 unlinked speakers | manual | `streamlit run fix_rosters.py` |
-| `IUO3Xz1kNkc` | 4 unlinked speakers | manual | `streamlit run fix_rosters.py` |
+| `DbF9CPOueTI` | Winner missing | manual | Watch video; set winner in `playlist.json` |
+| `OaAUvM4SAkg` | Winner missing | manual | Watch video; set winner in `playlist.json` |
+| `ggM9BH__xtU` | Blind game; winner unknown; no intro roster | manual | Watch video; set winner in `playlist.json` |
 | `OPqWyO7h-wM` | 1 unlinked speaker | manual | `streamlit run fix_rosters.py` |
 | `QbzFmlScLSA` | 3 unlinked speakers | manual | `streamlit run fix_rosters.py` |
-| `DAb9sq5ku2k` | Members bonus game; only 4 of 14 claims verified | data/manual | Manual `roster_overrides.json` — low priority |
-| `z79AJOPoNi4`, `OaAUvM4SAkg` | Members-only; no audio | access | Download manually with valid membership cookies |
+| `DzTk6kSIg-M` | 4 unlinked speakers | manual | `streamlit run fix_rosters.py` |
+| `IUO3Xz1kNkc` | 4 unlinked speakers | manual | `streamlit run fix_rosters.py` |
+| `DAb9sq5ku2k` | Bonus format; only 4/14 claims verified | data/manual | Manual `roster_overrides.json` — low priority |
+| `d2M-N5iABRo`, `OYTaTtjk3ac`, `z79AJOPoNi4` | Members-only; no audio | access | Download with valid membership cookies |

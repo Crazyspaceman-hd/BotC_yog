@@ -5,11 +5,13 @@ Writes: outputs/<VIDEO_ID>/intro_roster.json
         outputs/<VIDEO_ID>/intro_debug/  (optional debug crops, --debug flag)
 
 During the intro phase of each BotC game the Yogscast Minecraft mod shows a
-full-screen overlay for each player:
+full-screen overlay for each player from the Storyteller's POV:
 
-  Left panel  : username  +  the role the player is TOLD they have (believed)
-  Right panel : the ACTUAL role (differs when the player is deceived,
-                e.g. Marionette, Drunk, Lunatic, Spy, Recluse)
+  Left panel  : username  +  the player's ACTUAL role (always)
+  Right panel : the player's BELIEVED role (only for deceptive roles:
+                Drunk/Lunatic/Marionette), OR info about other players
+                (demon bluffs, info-role reveals, role-pick prompts, etc.)
+                In all non-deceptive cases the right panel must be ignored.
 
 Algorithm:
   1. Sample one frame per SAMPLE_INTERVAL seconds for the first INTRO_WINDOW s
@@ -23,8 +25,10 @@ OCR backend priority:  easyocr (GPU)  >  pytesseract  >  debug-frame-only mode
 
 Usage:
     python scrape_intro.py [video_id]
-    python scrape_intro.py [video_id] --debug   # also save cropped debug images
-    python scrape_intro.py [video_id] --force   # overwrite existing output
+    python scrape_intro.py [video_id] --debug          # also save cropped debug images
+    python scrape_intro.py [video_id] --force          # overwrite existing output
+    python scrape_intro.py [video_id] --force-manual   # also overwrite manual_entry files
+    python scrape_intro.py --all --force               # re-scrape all videos (skips manual_entry)
 """
 
 import argparse
@@ -108,20 +112,22 @@ CUTOFF_BUFFER   = 90.0    # extra seconds to scan after all players are found
 DECEPTIVE_ROLES = {"drunk", "lunatic", "marionette"}
 
 # Normalised crop regions as (x1, y1, x2, y2) fractions of frame dimensions.
-# Calibrated against the Yogscast BotC Minecraft mod reference screenshot (480×270 px).
+# Calibrated against 1920×1080 video frames from multiple episodes.
 #
-# Left panel layout (approx pixels in ref image):
-#   [avatar 8-78, y145-195] | [BEN  80-160, y148-163] | [MARIONETTE 170-234, y148-163]
-#   Description text below the nameplate strip.
-# Right panel layout:
-#   Dark header with [RAVENKEEPER 268-455, y42-59]
+# Nameplate strip (left panel) measured across several videos:
+#   - Text top:    y ≈ 0.35–0.37  (varies slightly by camera angle / animation frame)
+#   - Text bottom: y ≈ 0.42–0.44
+#   Using y = 0.34–0.46 gives ≥30 px headroom above and below at 1080p.
+#
+# Right panel header (believed role for deceptive players, bluff/info otherwise):
+#   Same y band as the left nameplate strip — right card mirrors the left layout.
 #
 # Run  python calibrate_scraper.py <id>  to get annotated frames for fine-tuning.
 LAYOUT = {
     "badge_area":    (0.00, 0.00, 0.10, 0.26),  # top-left: GOOD TEAM (blue) + EVIL TEAM (red)
     "player_name":   (0.08, 0.42, 0.20, 0.48),  # left nameplate — username  ("BEN")
-    "believed_role": (0.20, 0.42, 0.50, 0.48),  # left nameplate — role told ("MARIONETTE")
-    "actual_role":   (0.72, 0.42, 0.98, 0.48),  # right panel header         ("RAVENKEEPER")
+    "believed_role": (0.20, 0.42, 0.50, 0.48),  # left nameplate — actual role ("IMP", "MAYOR"…)
+    "actual_role":   (0.72, 0.42, 0.98, 0.48),  # right panel header (believed role / info)
     "desc_box":      (0.00, 0.50, 0.22, 0.72),  # role description card (cream bg, always present
                                                  # in storyteller-POV intro frames)
 }
@@ -194,15 +200,21 @@ def is_intro_frame(frame: np.ndarray) -> bool:
         red  = (cv2.inRange(hsv, _EVIL_LO1, _EVIL_HI1) |
                 cv2.inRange(hsv, _EVIL_LO2, _EVIL_HI2))
 
-        # Check 1: full-screen overlay — both team badges present
-        if (float(blue.sum()) / 255.0 / total > 0.010 and
-                float(red.sum()) / 255.0 / total > 0.002):
+        # Check 1: full-screen overlay — both team badges present.
+        # Raised from (0.010, 0.002) to (0.06, 0.03): the genuine overlay has
+        # large saturated badges (blue~0.13+, red~0.10+). Low values (blue<0.06)
+        # are caused by Minecraft sky/terrain colour leaking into the badge area
+        # on frames that are NOT actual intro cards.
+        if (float(blue.sum()) / 255.0 / total > 0.06 and
+                float(red.sum()) / 255.0 / total > 0.03):
             return True
 
-        # Check 2: nameplate badge bleed — strongly-saturated red only
+        # Check 2: nameplate badge bleed — strongly-saturated red only.
+        # Raised from 0.05 to 0.10: genuine nameplate bleed reads ~0.13-0.15;
+        # Minecraft red-block/terrain leaks read ~0.09 and are false positives.
         strong_red = (cv2.inRange(hsv, _NAMEPLATE_LO1, _NAMEPLATE_HI1) |
                       cv2.inRange(hsv, _NAMEPLATE_LO2, _NAMEPLATE_HI2))
-        if float(strong_red.sum()) / 255.0 / total > 0.05:
+        if float(strong_red.sum()) / 255.0 / total > 0.10:
             return True
 
     # ── Check 3: cream role-description box ───────────────────────────────────
@@ -224,11 +236,95 @@ def _upscale(crop: np.ndarray, scale: int = 3) -> np.ndarray:
 
 
 def _preprocess_gray(crop: np.ndarray) -> np.ndarray:
-    """Upscale + grayscale + CLAHE — for pytesseract."""
+    """Upscale + grayscale + CLAHE — for pytesseract (general purpose)."""
     up    = _upscale(crop)
     gray  = cv2.cvtColor(up, cv2.COLOR_BGR2GRAY)
     clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
     return clahe.apply(gray)
+
+
+def _preprocess_nameplate(crop: np.ndarray) -> np.ndarray:
+    """Isolate white text on nameplate background before OCR.
+
+    Good-team player nameplates use a blue (H≈90-135) background.
+    Evil-team player nameplates use a red (H≈0-12 or 163-180) background.
+    Both carry white text.  The surrounding area is Minecraft terrain which
+    confuses pytesseract PSM 7 with texture patterns that look like letters.
+
+    Strategy:
+      1. Upscale 3× for better OCR resolution.
+      2. HSV-mask both blue and red nameplate regions (union).
+      3. Tight-crop: find the largest connected coloured blob and discard
+         everything outside its bounding box.  The nameplate is one solid
+         compact rectangle; terrain noise is small scattered fragments.
+         This removes the main source of OCR garbage without needing to
+         know anything about screen layout.  Falls back to the full crop
+         if no blob meets the minimum area threshold.
+      4. Dilate slightly to capture adjacent white text pixels.
+      5. Within that mask, flag high-brightness (≥180 V) pixels as text.
+      6. Output: black text on white background (for tesseract dark-on-light).
+    """
+    up  = _upscale(crop)
+    hsv = cv2.cvtColor(up, cv2.COLOR_BGR2HSV)
+
+    # Blue nameplate background (good-team cards)
+    blue = cv2.inRange(hsv,
+                       np.array([ 90,  50,  50], dtype=np.uint8),
+                       np.array([135, 255, 255], dtype=np.uint8))
+
+    # Red nameplate background (evil-team cards; hue wraps around 0 in HSV)
+    red1 = cv2.inRange(hsv,
+                       np.array([  0,  50,  50], dtype=np.uint8),
+                       np.array([ 12, 255, 255], dtype=np.uint8))
+    red2 = cv2.inRange(hsv,
+                       np.array([163,  50,  50], dtype=np.uint8),
+                       np.array([180, 255, 255], dtype=np.uint8))
+    red = cv2.bitwise_or(red1, red2)
+
+    # Union of blue and red nameplate regions
+    colored = cv2.bitwise_or(blue, red)
+
+    # ── Tight crop to nameplate blob ──────────────────────────────────────────
+    # The nameplate is a wide horizontal bar that spans most of the crop's
+    # height.  Minecraft terrain noise produces only short, squat blobs.
+    # Strategy: filter for blobs that are at least 30 % of the crop height
+    # (nameplate passes; terrain noise doesn't), then among those take the
+    # largest-area blob.  Falls back to the full crop when no qualifying blob
+    # is found so the old behaviour is preserved for edge cases.
+    contours, _ = cv2.findContours(colored, cv2.RETR_EXTERNAL,
+                                   cv2.CHAIN_APPROX_SIMPLE)
+    MIN_BLOB_H = up.shape[0] * 0.30   # 30 % of crop height after 3× upscale
+    tall_blobs = [c for c in contours
+                  if cv2.boundingRect(c)[3] >= MIN_BLOB_H
+                  and cv2.contourArea(c) > 100]
+    if tall_blobs:
+        # The nameplate is always at the LEFT edge of the crop region.
+        # Minecraft terrain may produce larger blobs further right.
+        # Select the tall blob with the smallest bx (leftmost).
+        best = min(tall_blobs, key=lambda c: cv2.boundingRect(c)[0])
+        bx, by, bw, bh = cv2.boundingRect(best)
+        pad = 10   # pixels of padding (in 3× space)
+        bx1 = max(0, bx - pad)
+        by1 = max(0, by - pad)
+        bx2 = min(up.shape[1], bx + bw + pad)
+        by2 = min(up.shape[0], by + bh + pad)
+        up      = up     [by1:by2, bx1:bx2]
+        colored = colored[by1:by2, bx1:bx2]
+
+    # Expand mask to capture adjacent white text pixels
+    kernel      = np.ones((5, 5), np.uint8)
+    colored_exp = cv2.dilate(colored, kernel, iterations=2)
+
+    gray = cv2.cvtColor(up, cv2.COLOR_BGR2GRAY)
+
+    # White text pixels inside (or touching) the nameplate region
+    text_mask = np.zeros_like(gray)
+    text_mask[(colored_exp > 0) & (gray > 180)] = 255
+
+    # Black text on white background (tesseract default expectation)
+    result = cv2.bitwise_not(text_mask)
+    clahe  = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+    return clahe.apply(result)
 
 
 def _ocr_easyocr(crop: np.ndarray, reader) -> str:
@@ -240,24 +336,34 @@ def _ocr_easyocr(crop: np.ndarray, reader) -> str:
     return " ".join(texts).strip()
 
 
-def _ocr_pytesseract(crop: np.ndarray) -> str:
+def _ocr_pytesseract(crop: np.ndarray, nameplate: bool = False) -> str:
     import pytesseract
     from PIL import Image
-    img = Image.fromarray(_preprocess_gray(crop))
+    preprocessed = _preprocess_nameplate(crop) if nameplate else _preprocess_gray(crop)
+    # Guard: if the processed image is blank (no text found by the blue-mask
+    # step), tesseract will hallucinate characters from noise.  Skip OCR.
+    if nameplate and int(np.sum(preprocessed < 250)) < 100:
+        return ""
+    img = Image.fromarray(preprocessed)
     return pytesseract.image_to_string(
         img, config="--oem 3 --psm 7 -c tessedit_char_blacklist=|{}<>"
     ).strip()
 
 
-def ocr_crop(crop: np.ndarray, backend: str, reader) -> str:
-    """Run OCR on *crop*; return text or '' on any failure."""
+def ocr_crop(crop: np.ndarray, backend: str, reader,
+             nameplate: bool = False) -> str:
+    """Run OCR on *crop*; return text or '' on any failure.
+
+    Set *nameplate=True* for player-name and role crops so the blue-masking
+    preprocessor is used (removes Minecraft background noise).
+    """
     if crop is None or crop.size == 0:
         return ""
     try:
         if backend == "easyocr":
             return _ocr_easyocr(crop, reader)
         elif backend == "pytesseract":
-            return _ocr_pytesseract(crop)
+            return _ocr_pytesseract(crop, nameplate=nameplate)
     except Exception as exc:
         print(f"    [OCR error] {type(exc).__name__}: {exc}")
     return ""
@@ -277,6 +383,12 @@ def best_match(raw: str, candidates: list[str],
 
     best_s, best_i = 0.0, -1
     for i, cn in enumerate(cands_n):
+        # Coverage check: the OCR string must cover more than half the
+        # candidate's length.  This prevents short garbled fragments (e.g.
+        # "ine" from terrain noise) from fuzzy-matching long role names
+        # (e.g. "tinker") purely by coincidence.
+        if len(cn) > 0 and len(raw_n) <= len(cn) / 2:
+            continue
         score = difflib.SequenceMatcher(None, raw_n, cn).ratio()
         if score > best_s:
             best_s, best_i = score, i
@@ -328,6 +440,16 @@ def scrape_video(
     last_det_time: float      = -MIN_FRAME_GAP - 1.0
     found_names:   set[str]   = set()
     last_intro_t:  float      = -1.0   # timestamp of most recent intro-overlay frame
+    # Name persistence: when the name OCR is blank but the role OCR is clear,
+    # attribute the role to the most recently confirmed player name (up to
+    # NAME_PERSIST_S seconds ago).  This handles frames where the name is
+    # momentarily unreadable but the role text is legible.
+    # IMPORTANT: keep this well below MIN_FRAME_GAP (5 s) so persistence
+    # does NOT bleed across consecutive player cards.  Each new card starts
+    # ≈5 s after the previous detection, so 4 s expires in time.
+    NAME_PERSIST_S = 4.0
+    last_name:      str | None = None
+    last_name_t:    float      = -NAME_PERSIST_S - 1.0
     frame_no = 0
 
     while frame_no < end_frame:
@@ -388,9 +510,11 @@ def scrape_video(
                 bel_crop  = _crop(frame, LAYOUT["believed_role"])
                 act_crop  = _crop(frame, LAYOUT["actual_role"])
 
-                name_raw = ocr_crop(name_crop, backend, reader)
-                bel_raw  = ocr_crop(bel_crop,  backend, reader)
-                act_raw  = ocr_crop(act_crop,  backend, reader)
+                # name uses standard CLAHE (no blue mask — avatar fills most of crop)
+                # role crops use blue-mask preprocessing to reject Minecraft background
+                name_raw = ocr_crop(name_crop, backend, reader, nameplate=False)
+                bel_raw  = ocr_crop(bel_crop,  backend, reader, nameplate=True)
+                act_raw  = ocr_crop(act_crop,  backend, reader, nameplate=True)
 
                 if debug_dir:
                     cv2.imwrite(str(debug_dir / f"t{t:.1f}_name.png"),    name_crop)
@@ -404,36 +528,48 @@ def scrape_video(
             bel_left  = best_match(bel_raw,  roles)   # left panel
             act_right = best_match(act_raw,  roles)   # right panel
 
-            # How the two panels map to actual/believed roles varies by role type:
-            #
-            # DECEPTIVE roles (Drunk, Lunatic, Marionette):
-            #   Left panel  = player's TRUE game role  (e.g. Drunk)
-            #   Right panel = the FALSE role the player is told (e.g. Empath)
-            #   → actual = left, believed = right
-            #
-            # All other roles (e.g. Spy, normal Townsfolk):
-            #   Left panel  = cover alias / only role  (e.g. Investigator for Spy)
-            #   Right panel = true identity (e.g. Spy), or empty for non-deceptive
-            #   → actual = right (if present), else left; believed = actual (no deception)
+            # Update name persistence tracker on a clean name read
+            if name:
+                last_name  = name
+                last_name_t = t
+            # Fall back to last confirmed name when OCR momentarily blanks —
+            # the card is still showing the same player (e.g. parallax / fade).
+            elif last_name and (t - last_name_t) <= NAME_PERSIST_S:
+                name = last_name
+
+            # The LEFT panel ALWAYS shows the player's true game role.
+            # The RIGHT panel has two distinct meanings:
+            #   a) DECEPTIVE roles (Drunk, Lunatic, Marionette):
+            #        Left  = actual role  (e.g. "Drunk")
+            #        Right = believed role (e.g. "Empath" — what they think they are)
+            #   b) All other situations — right panel must be IGNORED:
+            #        - Demon bluffs (3 good-role cards shown to the demon)
+            #        - Info-role reveals (e.g. Investigator seeing "Spy")
+            #        - Role-pick prompts (e.g. Boffin choosing a role)
+            # Storing the right panel for non-deceptive roles would record
+            # a bluff/info role instead of the player's real role.
             if bel_left and bel_left.lower() in DECEPTIVE_ROLES:
                 actual_role   = bel_left
                 believed_role = act_right or bel_left
-            elif act_right:
-                actual_role   = act_right
-                believed_role = act_right
             else:
                 actual_role   = bel_left
                 believed_role = bel_left
 
-            if name_raw and (name or believed_role):
+            # Require a confirmed player-name match (name is not None).
+            # Entries where name OCR didn't fuzzy-match any known player are
+            # almost certainly noise (bluff cards, info-target cards, etc.) and
+            # storing them as phantom players corrupts the roster.
+            if name and believed_role:
                 deception = (f"  [DECEIVED: believed={believed_role}]"
                              if actual_role and believed_role
                              and actual_role != believed_role else "")
                 print(f"    -> name={name!r}  actual={actual_role!r}{deception}")
                 detections.append({
-                    "name":          name or name_raw,
-                    "believed_role": (believed_role or bel_raw or "unknown").lower(),
-                    "actual_role":   (actual_role   or act_raw or "unknown").lower(),
+                    "name":          name,
+                    "believed_role": (believed_role or "unknown").lower(),
+                    # Never fall back to raw OCR text for stored roles — garbled OCR
+                    # (e.g. "Ome Sige Or") is worse than "unknown" for downstream use.
+                    "actual_role":   (actual_role or "unknown").lower(),
                     "frame_time":    round(t, 2),
                 })
                 last_det_time = t
@@ -452,8 +588,17 @@ def deduplicate(detections: list[dict]) -> list[dict]:
     """
     One entry per player.  Priority order:
       1. Entries with deception (actual ≠ believed) — most complete
-      2. Among non-deceptive entries: last occurrence wins (later frames
-         are more stable; the right panel text often clears up over time)
+      2. Among non-deceptive entries: FIRST occurrence wins.
+         Rationale: the player's own intro card always appears before any
+         secondary cards (demon bluff cards, info-role target cards, etc.).
+         Keeping the first reading avoids overwriting the correct demon role
+         with a subsequent bluff role that also passes is_intro_frame().
+
+    After per-player deduplication, a second pass collapses entries that
+    share the same actual_role.  BotC roles are unique within a script, so
+    two different "players" with the same role within a 60-second window are
+    almost certainly the same card OCR'd with a garbled name on one frame.
+    The entry with the earlier frame_time wins.
     """
     by_name: dict[str, dict] = {}
     for d in detections:
@@ -467,11 +612,35 @@ def deduplicate(detections: list[dict]) -> list[dict]:
             if new_deceptive and not old_deceptive:
                 # New entry has deception info — upgrade
                 by_name[key] = d
-            elif not old_deceptive and not new_deceptive:
-                # Neither is deceptive: take the latest (most stable reading)
-                by_name[key] = d
+            # elif not old_deceptive and not new_deceptive: keep first (do nothing)
             # else: old is deceptive, new is not — keep old
-    return list(by_name.values())
+
+    # Second pass: collapse duplicate roles (same actual_role, different player names).
+    # Only suppress if the second detection occurs within 60s of the first — a tighter
+    # window avoids suppressing genuinely distinct players with the same role across
+    # different card appearances.
+    by_role: dict[str, dict] = {}
+    result: list[dict] = []
+    ROLE_DEDUP_WINDOW_S = 60.0
+    for d in sorted(by_name.values(), key=lambda x: x["frame_time"]):
+        role = d["actual_role"].lower()
+        if role == "unknown":
+            result.append(d)
+            continue
+        if role not in by_role:
+            by_role[role] = d
+            result.append(d)
+        else:
+            prev = by_role[role]
+            if d["frame_time"] - prev["frame_time"] <= ROLE_DEDUP_WINDOW_S:
+                # Likely the same card read twice with different name OCR — suppress.
+                print(f"    [role-dedup] dropping {d['name']!r}/{role} at t={d['frame_time']}"
+                      f" (same role as {prev['name']!r} at t={prev['frame_time']})")
+            else:
+                # Far enough apart — probably a different game section; keep it.
+                by_role[role] = d
+                result.append(d)
+    return result
 
 
 # ── CLI entry point ──────────────────────────────────────────────────────────
@@ -480,7 +649,8 @@ _VIDEO_EXTS = ("mp4", "webm", "mkv", "avi", "mp4.webm")
 
 
 def _scrape_one(video_id: str, backend, reader,
-                debug: bool = False, force: bool = False) -> bool:
+                debug: bool = False, force: bool = False,
+                force_manual: bool = False) -> bool:
     """Scrape a single video. Returns True on success, False on skip."""
     out_dir  = Path(f"outputs/{video_id}")
     out_json = out_dir / "intro_roster.json"
@@ -488,6 +658,18 @@ def _scrape_one(video_id: str, backend, reader,
     if out_json.exists() and not force:
         print(f"  [SKIP] intro_roster.json already exists (use --force to overwrite)")
         return False
+
+    # Never overwrite manually-curated entries — they represent known-correct ground
+    # truth that automated OCR cannot reliably reproduce.  Pass --force-manual to
+    # override (intended only for explicit re-curation, not routine batch runs).
+    if out_json.exists() and not force_manual:
+        try:
+            _existing = json.loads(out_json.read_text(encoding="utf-8"))
+            if _existing.get("source") == "manual_entry":
+                print(f"  [SKIP] intro_roster.json is a manual_entry — use --force-manual to overwrite")
+                return False
+        except Exception:
+            pass  # malformed JSON: fall through and re-scrape
 
     video_path = None
     for ext in _VIDEO_EXTS:
@@ -547,15 +729,18 @@ def _init_ocr_with_test():
 def main(video_id: str = "lF96Jd3Eaeg",
          debug: bool = False,
          force: bool = False,
+         force_manual: bool = False,
          test_only: bool = False) -> None:
     print("=== scrape_intro.py ===\n")
     backend, reader = _init_ocr_with_test()
     if test_only:
         return
-    _scrape_one(video_id, backend, reader, debug=debug, force=force)
+    _scrape_one(video_id, backend, reader, debug=debug, force=force,
+                force_manual=force_manual)
 
 
-def main_all(debug: bool = False, force: bool = False) -> None:
+def main_all(debug: bool = False, force: bool = False,
+             force_manual: bool = False) -> None:
     """Scrape all videos that have a downloaded video file, reusing one OCR instance."""
     outputs = Path("outputs")
     video_ids = sorted(
@@ -572,7 +757,8 @@ def main_all(debug: bool = False, force: bool = False) -> None:
     for i, vid in enumerate(video_ids, 1):
         print(f"\n[{i}/{len(video_ids)}] {vid}")
         try:
-            if _scrape_one(vid, backend, reader, debug=debug, force=force):
+            if _scrape_one(vid, backend, reader, debug=debug, force=force,
+                           force_manual=force_manual):
                 ok += 1
             else:
                 skipped += 1
@@ -597,11 +783,14 @@ if __name__ == "__main__":
     ap.add_argument("--debug", action="store_true",
                     help="Save cropped debug images to outputs/<id>/intro_debug/")
     ap.add_argument("--force", action="store_true",
-                    help="Overwrite existing intro_roster.json")
+                    help="Overwrite existing intro_roster.json (skips manual_entry files)")
+    ap.add_argument("--force-manual", action="store_true", dest="force_manual",
+                    help="Also overwrite intro_roster.json files with source=manual_entry")
     ap.add_argument("--test", action="store_true",
                     help="Initialise OCR, run smoke-test, then exit (no video needed)")
     args = ap.parse_args()
     if args.all_videos:
-        main_all(debug=args.debug, force=args.force)
+        main_all(debug=args.debug, force=args.force, force_manual=args.force_manual)
     else:
-        main(args.video_id, debug=args.debug, force=args.force, test_only=args.test)
+        main(args.video_id, debug=args.debug, force=args.force,
+             force_manual=args.force_manual, test_only=args.test)

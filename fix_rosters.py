@@ -202,6 +202,20 @@ def all_issues(entries_key: tuple) -> list[dict]:
         except Exception:
             continue
 
+        # Load confirmed_duplicates from roster_overrides so intentional
+        # multi-player roles (e.g. two Amnesiacs) don't keep surfacing here.
+        overrides_path = OUTPUTS_DIR / vid / "roster_overrides.json"
+        confirmed_dups: set[str] = set()
+        if overrides_path.exists():
+            try:
+                ov = json.loads(overrides_path.read_text(encoding="utf-8"))
+                confirmed_dups = {
+                    r.lower().strip()
+                    for r in ov.get("confirmed_duplicates", [])
+                }
+            except Exception:
+                pass
+
         for p in players:
             for field in ("actual_role", "believed_role"):
                 raw = (p.get(field) or "").lower().strip()
@@ -211,13 +225,15 @@ def all_issues(entries_key: tuple) -> list[dict]:
         role_players: dict[str, list] = defaultdict(list)
         for p in players:
             r = p.get("actual_role", "")
-            n = p.get("name", "")
+            # Resolve name through aliases so that variants (e.g. "RT Game" vs
+            # "RTGame") are treated as the same player, not a duplicate.
+            n = resolve_player_name(p.get("name", ""), _PLAYER_ALIASES)
             if r and r != "unknown":
                 role_counts[r] += 1
                 role_players[r].append(n)
 
         for p in players:
-            name   = p.get("name", "")
+            name   = resolve_player_name(p.get("name", ""), _PLAYER_ALIASES)
             actual = p.get("actual_role", "")
             bel    = p.get("believed_role", "")
             ft     = float(p.get("frame_time", 0))
@@ -225,7 +241,8 @@ def all_issues(entries_key: tuple) -> list[dict]:
             if key in seen:
                 continue
 
-            if actual and actual != "unknown" and role_counts[actual] > 1:
+            if actual and actual != "unknown" and role_counts[actual] > 1 \
+                    and actual not in confirmed_dups:
                 conflicts = [x for x in role_players[actual] if x != name]
                 issues.append({
                     "video_id": vid, "title": title, "members": members,

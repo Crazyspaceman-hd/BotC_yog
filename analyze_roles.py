@@ -721,17 +721,40 @@ def main(video_id: str = "lF96Jd3Eaeg") -> None:
                 continue
             name = resolve_player_name(raw_name, _PLAYER_ALIASES)
             is_st = name.lower() == "storyteller"
+            # Manual role_history: list of {time, previous_role, actual_role}
+            # allows fix_rosters.py (or hand-editing) to record mid-game changes.
+            manual_history = [
+                {
+                    "time":          float(ch.get("time", 0)),
+                    "previous_role": (ch.get("previous_role") or "").lower(),
+                    "actual_role":   (ch.get("actual_role")   or "").lower(),
+                    "source":        "manual",
+                }
+                for ch in info.get("role_history", [])
+                if ch.get("actual_role")
+            ]
+            final_role = (
+                manual_history[-1]["actual_role"]
+                if manual_history
+                else (info.get("actual_role") or info.get("believed_role") or "unknown").lower()
+            )
+            initial_role = (
+                manual_history[0]["previous_role"] or final_role
+                if manual_history
+                else final_role
+            )
             roster[spk] = {
                 "name":               name,
                 "believed_role":      (info.get("believed_role") or "unknown").lower(),
-                "actual_role":        (info.get("actual_role") or
-                                       info.get("believed_role") or "unknown").lower(),
-                "initial_actual_role": (info.get("actual_role") or
-                                        info.get("believed_role") or "unknown").lower(),
-                "role_history":       [],
+                "actual_role":        final_role,
+                "initial_actual_role": initial_role,
+                "role_history":       manual_history,
                 "source":             "manual",
                 "is_storyteller":     is_st,
             }
+            if manual_history:
+                print(f"  [manual role history] {name}: "
+                      f"{len(manual_history)} change(s) loaded from overrides")
             n_applied += 1
         if n_applied:
             print(f"\nApplied {n_applied} manual override(s) from {overrides_file}")
@@ -768,17 +791,35 @@ def main(video_id: str = "lF96Jd3Eaeg") -> None:
     print("\nDetecting mid-game role changes ...")
     detect_role_changes(segments, roster, roles)
 
-    # Print role changes if any
+    # Persist role changes to role_changes.json for build_db.py
     changed = [
         (spk, info) for spk, info in roster.items()
         if info.get("role_history") and not info.get("is_storyteller")
     ]
     if changed:
         print(f"\n  {len(changed)} player(s) changed roles during the game:")
+        rchg_records = []
         for spk, info in changed:
             for ch in info["role_history"]:
                 print(f"    {info['name']}  {ch['previous_role']} -> "
                       f"{ch['actual_role']}  at {fmt_ts(ch['time'])}")
+                rchg_records.append({
+                    "player_name":   info["name"],
+                    "previous_role": ch["previous_role"],
+                    "new_role":      ch["actual_role"],
+                    "time":          ch["time"],
+                    "source":        ch.get("source", "nlp"),
+                })
+        rchg_path = out_dir / "role_changes.json"
+        rchg_path.write_text(
+            json.dumps(rchg_records, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        print(f"  Wrote {len(rchg_records)} role change(s) -> {rchg_path}")
+    else:
+        # Remove stale file if a re-run found no changes
+        stale = out_dir / "role_changes.json"
+        if stale.exists():
+            stale.unlink()
 
     # ── C: scan game segments for role claims ─────────────────────────────────
     print("\nScanning game segments for role claims ...")
@@ -808,13 +849,17 @@ def main(video_id: str = "lF96Jd3Eaeg") -> None:
                   playlist_data.get("entries", [])
         for e in entries:
             if e.get("id") == video_id:
-                e["winner"] = winner
+                existing = e.get("winner")
+                if winner is None and existing:
+                    print(f"Keeping existing winner='{existing}' (detection returned None)\n")
+                else:
+                    e["winner"] = winner
+                    playlist_path.write_text(
+                        json.dumps(playlist_data, indent=2, ensure_ascii=False),
+                        encoding="utf-8",
+                    )
+                    print(f"Saved winner='{winner}' to playlist.json\n")
                 break
-        playlist_path.write_text(
-            json.dumps(playlist_data, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        print(f"Saved winner='{winner}' to playlist.json\n")
 
     # ── G: console summary grouped by player ─────────────────────────────────
     print("=== Lie Analysis Summary ===\n")

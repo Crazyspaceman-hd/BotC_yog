@@ -126,10 +126,13 @@ def _load_segments(out_dir: Path) -> list[dict]:
 
 
 def _load_roster(out_dir: Path) -> dict[str, str]:
-    """Return {player_name_lower: actual_role_normalised} from roster sources.
+    """Return {player_name_lower: starting_actual_role_normalised} from roster sources.
 
-    roster_overrides.json format: {speaker_id: {name, actual_role, believed_role}}
-    intro_roster.json format:     {players: [{name, actual_role, believed_role}]}
+    Uses initial_actual_role when present so that role-changed players start
+    from their game-start role.  _role_at() then advances through role_changes.
+
+    roster_overrides.json format: {speaker_id: {name, actual_role, initial_actual_role, ...}}
+    intro_roster.json format:     {players: [{name, actual_role, initial_actual_role, ...}]}
     """
     roster: dict[str, str] = {}
 
@@ -142,7 +145,10 @@ def _load_roster(out_dir: Path) -> dict[str, str]:
                 if not isinstance(info, dict):
                     continue
                 pname = (info.get("name") or "").strip()
-                role  = info.get("actual_role") or info.get("believed_role") or ""
+                # Use initial_actual_role when available; fall back to actual_role
+                role  = (info.get("initial_actual_role")
+                         or info.get("actual_role")
+                         or info.get("believed_role") or "")
                 if pname and role:
                     roster[pname.lower()] = normalize_role(role)
         if roster:
@@ -154,10 +160,53 @@ def _load_roster(out_dir: Path) -> dict[str, str]:
         data = json.loads(p.read_text(encoding="utf-8"))
         for pl in data.get("players", []):
             pname = (pl.get("name") or "").strip()
-            role  = pl.get("actual_role") or pl.get("believed_role") or ""
+            role  = (pl.get("initial_actual_role")
+                     or pl.get("actual_role")
+                     or pl.get("believed_role") or "")
             if pname and role:
                 roster[pname.lower()] = normalize_role(role)
     return roster
+
+
+def _load_role_changes(out_dir: Path) -> dict[str, list[tuple[float, str]]]:
+    """Return {player_name_lower: sorted [(change_time_s, new_role_normalised), ...]}.
+
+    Reads role_changes.json written by analyze_roles.py.  Empty dict if absent.
+    """
+    p = out_dir / "role_changes.json"
+    if not p.exists():
+        return {}
+    try:
+        changes: list[dict] = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    result: dict[str, list[tuple[float, str]]] = {}
+    for ch in changes:
+        pname = (ch.get("player_name") or "").lower()
+        new_r = normalize_role(ch.get("new_role") or "")
+        t     = float(ch.get("time", 0))
+        if pname and new_r:
+            result.setdefault(pname, []).append((t, new_r))
+    for lst in result.values():
+        lst.sort()
+    return result
+
+
+def _role_at(pname_low: str, t: float,
+             roster: dict[str, str],
+             role_changes: dict[str, list[tuple[float, str]]]) -> str:
+    """Return the normalised actual role for *pname_low* at timestamp *t*.
+
+    Starts from the player's game-start role (from roster) then advances
+    through any role_changes that occurred at or before *t*.
+    """
+    role = roster.get(pname_low, "")
+    for change_t, new_role in role_changes.get(pname_low, []):
+        if change_t <= t:
+            role = new_role
+        else:
+            break
+    return role
 
 
 def _load_speaker_map(out_dir: Path) -> dict[str, str]:
@@ -256,6 +305,7 @@ def _find_storyteller(rows: list[dict]) -> str | None:
 def _extract(video_id: str,
              rows: list[dict],
              roster: dict[str, str],
+             role_changes: dict[str, list[tuple[float, str]]],
              speaker_map: dict[str, str],
              phase_labels: list[dict],
              known_lies: set[tuple[str, str]],
@@ -291,7 +341,7 @@ def _extract(video_id: str,
                 base_conf *= 0.5  # unknown role name -> lower confidence
 
             pname_low = pname.lower()
-            actual_role = roster.get(pname_low, "")
+            actual_role = _role_at(pname_low, t, roster, role_changes)
             verified_lie = (pname_low, role_norm) in known_lies
 
             events.append({
@@ -426,6 +476,7 @@ def main(video_id: str, force: bool = False) -> None:
 
     rows         = _load_segments(out_dir)
     roster       = _load_roster(out_dir)
+    role_changes = _load_role_changes(out_dir)
     speaker_map  = _load_speaker_map(out_dir)
     phase_labels = _load_phase_labels(out_dir)
     known_lies   = _load_known_lies(out_dir)
@@ -433,12 +484,14 @@ def main(video_id: str, force: bool = False) -> None:
     st_id        = _find_storyteller(rows)
 
     print(f"  Segments: {len(rows)}  Roster players: {len(roster)}")
+    print(f"  Role changes: {sum(len(v) for v in role_changes.values())} "
+          f"across {len(role_changes)} player(s)")
     print(f"  Speaker map: {speaker_map}")
     print(f"  Storyteller speaker: {st_id}")
     print(f"  Phase labels: {len(phase_labels)} intervals")
     print(f"  Known lies cross-ref: {len(known_lies)}")
 
-    events = _extract(video_id, rows, roster, speaker_map,
+    events = _extract(video_id, rows, roster, role_changes, speaker_map,
                       phase_labels, known_lies, known_roles,
                       storyteller_id=st_id)
 

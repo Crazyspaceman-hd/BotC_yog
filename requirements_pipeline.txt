@@ -1,5 +1,0 @@
-yt-dlp
-faster-whisper
-pandas
-numpy
-soundfile

@@ -1,6 +1,6 @@
 # Dataset Snapshot
 
-> **Last updated:** 2026-03-07
+> **Last updated:** 2026-03-19 (feat/player-status-tracking: N5–N8 enrichment nodes; N8 = claimed-role outcomes analysis layer)
 > Run `python validate.py` for the current end-state check.
 
 ---
@@ -9,24 +9,36 @@
 
 | Status | Count |
 |--------|-------|
-| analyzed (full pipeline complete) | 52 |
-| pending / members-only / skip | ~10 |
+| analyzed (full pipeline complete) | 54 |
+| members-only (no audio available) | 5 |
+| blind game (no reliable intro roster) | 3 |
+| skip (non-game content) | 1 |
 
-DB as of last rebuild: **183 roles, 322 roster rows, 834 lies, 81 871 segments**
+DB as of last rebuild: **54 videos, 183 roles, 299 roster rows, 895 lies, 30 542 segments**
+(`speaker_map`: 396 entries; `day_events`: 1 792 rows; `death_events`: 186 rows; `night_target_events`: 29 rows)
+
+Winner set: 51 / 54.  Missing winner: 3 (all structural — 1 skip/tutorial, 1 members-only, 1 blind game).
+
+Roster vs spreadsheet discrepancies: **115** (down from 128 pre-batch; majority are OCR coverage gaps, not wrong roles).
 
 ---
 
-## Enrichment coverage (N1/N2/N3)
+## Enrichment coverage (N0/N1/N2/N2b/N3/N4/N5/N6/N7/N8)
 
 | Enrichment | Coverage | Notes |
 |------------|----------|-------|
-| N1 speaker_consistency | 52 / 52 | 0 failures |
-| N2 phase_detection | 52 / 52 | 2 weak (Intro+Day only) |
-| N3 claim_extraction | 52 / 52 | 3 364 total claims, 0 empty |
+| N0 scan_frames | 48 / 53 | 5 missing (members-only / no video) |
+| N1 speaker_consistency | 52 / 53 | 1 missing |
+| N2 phase_detection | 53 / 53 | all covered |
+| N2b context_segments | 47 / 53 | requires phase_labels.csv; 6 missing = blind/members/no-phases |
+| N3 claim_extraction | 53 / 53 | 3 431 total claims |
+| N4 player_status | 50 / 53 | 3 missing = blind/members/empty roster |
+| N5 execution_context | 47 / 53 | 245 events; requires segments + roster |
+| N6 execution_episodes | 47 / 53 | 311 episodes; 97 resolved targets, 9 result confirmed |
+| N7 execution_claim_context | 47 / 53 | 311 episodes; target_claim resolved: 52/311 (17%); result_claim resolved: 3/311; lies flagged: 17 episodes |
+| N8 claimed_role_outcomes | 46 / 53 | 340 player rows; one per player per game; pressure/execution/claim/death all joined |
 
-**N2 weak videos** (low ST keyword density — check roster linkage first):
-- `OPqWyO7h-wM` — 1 unlinked speaker
-- `0wGTes2sqmE` — 2 unlinked speakers; winner missing
+*(53 = total processable; 1 video is skip-flagged)*
 
 ---
 
@@ -34,22 +46,51 @@ DB as of last rebuild: **183 roles, 322 roster rows, 834 lies, 81 871 segments**
 
 | Video | Issue | Action |
 |-------|-------|--------|
-| `0wGTes2sqmE` | 2 unlinked speakers; winner missing | Watch video; fix in `fix_rosters.py`; set winner |
-| `ggM9BH__xtU` | Blind game; winner unknown | Watch video; set winner in `playlist.json` |
-| `DzTk6kSIg-M` | 4 unlinked speakers | `streamlit run fix_rosters.py` |
-| `IUO3Xz1kNkc` | 4 unlinked speakers | `streamlit run fix_rosters.py` |
-| `OPqWyO7h-wM` | 1 unlinked speaker | `streamlit run fix_rosters.py` |
-| `QbzFmlScLSA` | 3 unlinked speakers | `streamlit run fix_rosters.py` |
+| `0wGTes2sqmE` | 2 unlinked speakers | Watch video; identify speakers; fix in `fix_rosters.py`; run `build_db.py` |
+| `ggM9BH__xtU` | Blind game; winner unknown; no intro roster | Watch video; set winner in `playlist.json` |
+| `DbF9CPOueTI` | Winner missing | Watch video; set winner in `playlist.json` |
+| `OaAUvM4SAkg` | Winner missing | Watch video; set winner in `playlist.json` |
+| `OPqWyO7h-wM` | 1 unlinked speaker (speaker_4, 25 segs — Duncan or Rythian) | Watch video; fix in `fix_rosters.py`; run `build_db.py` |
+| `QbzFmlScLSA` | 3 unlinked speakers (Yogs Staff game, non-regular cast) | Watch video; identify cast; fix in `fix_rosters.py`; run `build_db.py` |
+| `DzTk6kSIg-M` | 4 unlinked speakers | `streamlit run fix_rosters.py`; run `build_db.py` |
+| `IUO3Xz1kNkc` | 4 unlinked speakers | `streamlit run fix_rosters.py`; run `build_db.py` |
 | `DAb9sq5ku2k` | Bonus format; only 4/14 claims verified | Low priority; manual `roster_overrides.json` |
-| `z79AJOPoNi4`, `OaAUvM4SAkg` | Members-only; no audio | Download with membership cookies |
-| `DbF9CPOueTI` | Never processed | `python run_pipeline.py DbF9CPOueTI` |
+| `d2M-N5iABRo`, `z79AJOPoNi4` | Members-only; no audio | Download with valid membership cookies |
+| `OYTaTtjk3ac` | **Tutorial/meta video** (skip=True); not a real game — no player roster possible, speaker linking is N/A. Diarization ran but outputs are not meaningful for game analysis. | No action needed; validate.py excludes skip=True from speaker-link checks. |
+
+**Protected manual rosters** (do not re-scrape with `--force-manual`):
+- `tf_LO5NKKUU` — `source: manual_entry`; 6 players curated by hand
+- `HQlYPDUfM4Q` — `source: manual_entry`; 6 players curated by hand
+
+---
+
+## Speaker-linking notes
+
+### fix_rosters.py workflow
+`fix_rosters.py` writes directly to `outputs/<id>/roster_overrides.json` on save.
+The Streamlit UI reflects saved data immediately on reload.
+However, **`validate.py` reads the DB** — so `build_db.py` must be run after saving in
+`fix_rosters.py` before validation will reflect the change.
+Correct sequence: `streamlit run fix_rosters.py` → save → `python build_db.py` → `python validate.py`.
+
+### Unlinked speaker classification
+Investigated unlinked speakers in `QbzFmlScLSA`, `nPAdvl7pySg`, `OPqWyO7h-wM` (2026-03-14):
+
+- **Not overlap-clusters**: All unlinked speakers in `QbzFmlScLSA` (spk 3/4/5) and `nPAdvl7pySg`
+  span the full video duration. They are real individual players, not diarization artefacts.
+  Identification requires watching the video.
+- **`QbzFmlScLSA`**: "Yogs Staff" game with non-regular cast. `speaker_3` mentions Craig and Sarah;
+  `speaker_4` is addressed as Alex; speaker identities otherwise unknown without watching.
+  Currently only Matt (spk_1) and CRAIG (spk_2) are linked; 3 speakers and full roster remain open.
+- **`OPqWyO7h-wM`**: `speaker_4` has only 25 segments (via consistent.csv); remaining unlinked
+  player is Duncan or Rythian. Requires video watch to confirm.
+- **`nPAdvl7pySg`**: Blind game — speaker linking is expected to be incomplete.
 
 ---
 
 ## Active branches
 
-| Branch | Purpose |
-|--------|---------|
-| `develop` | Integration; merge features here |
-| `feat/nlp-enrichment` | N1/N2/N3 enrichment work (frozen, pending PR) |
-| `feat/speaker-linking-and-roster-tools` | Merged to main |
+| Branch | Purpose | State |
+|--------|---------|-------|
+| `develop` | Integration branch; N2–N10 enrichment, nomination/execution analytics, README + landing update | **ready for merge to main** |
+| `main` | Stable release baseline | awaiting PR from develop |

@@ -252,11 +252,14 @@ def check_unlinked_speakers(rpt: Report) -> None:
     """
     if not DB_PATH.exists():
         return
-    # Build set of blind video IDs so we can classify differently
+    entries = load_playlist_entries()
+    # skip=True: not a real game episode — speaker linking is N/A; exclude entirely
+    skip_vids: set[str] = {e["id"] for e in entries if e.get("skip")}
+    # blind/members: expected to have no speaker links (downgrade to INFO, not WARN)
     blind_vids: set[str] = {
-        e["id"] for e in load_playlist_entries()
+        e["id"] for e in entries
         if e.get("blind") or e.get("members_only")
-    }
+    } - skip_vids
     try:
         con = sqlite3.connect(str(DB_PATH))
         # Speakers in segments that have NO entry in speaker_map
@@ -273,6 +276,8 @@ def check_unlinked_speakers(rpt: Report) -> None:
         """).fetchall()
         warn_count = 0
         for vid, spk, n in unlinked:
+            if vid in skip_vids:
+                continue  # not a game episode; speaker linking is N/A
             if vid in blind_vids:
                 rpt.add(INFO, "curation:unlinked_speakers",
                         f"{spk} unlinked ({n} segs) - blind/members game, expected",
@@ -439,7 +444,7 @@ def check_partial_downloads(rpt: Report) -> None:
 
 def check_enrichment_artifacts(rpt: Report,
                                video_ids: list[str] | None = None) -> None:
-    """Report presence/validity of optional N1/N2/N3 enrichment artifacts.
+    """Report presence/validity of optional N0–N4 enrichment artifacts.
 
     These are always INFO-level — missing enrichment files never cause WARN or FAIL.
     Only run for 'analyzed' videos where the enrichment could have been generated.
@@ -455,46 +460,108 @@ def check_enrichment_artifacts(rpt: Report,
     targets  = [v for v in analyzed
                 if video_ids is None or v in video_ids]
 
-    n1_present = n2_valid = n3_valid = 0
-    n1_total   = len(targets)
+    n0_present = n1_present = n2_valid = n3_valid = n4_valid = 0
+    n_total    = len(targets)
     issues: list[str] = []
 
     for vid in targets:
         out = OUTPUTS_DIR / vid
+
+        # N0: frame_scan.json (visual frame scanner)
+        p_scan = out / "frame_scan.json"
+        if p_scan.exists():
+            try:
+                data = json.loads(p_scan.read_text(encoding="utf-8"))
+                if "frames" in data:
+                    n0_present += 1
+                else:
+                    issues.append(f"{vid}: frame_scan.json missing 'frames' key")
+            except Exception as exc:
+                issues.append(f"{vid}: frame_scan.json unreadable — {exc}")
 
         # N1: segments_consistent.csv
         p_cons = out / "segments_consistent.csv"
         if p_cons.exists():
             n1_present += 1
 
-        # N2: phase_labels.csv — check header and phase values
+        # N2: phase_labels.csv — check header, phase values, and round column
+        # Valid broad phases: Intro, Night, Day (Nomination/Execution are now
+        # day-scoped events written to day_events.csv, not top-level phases).
+        # "Unknown" and legacy "Nomination"/"Execution" are accepted with a
+        # warning so that existing files do not fail validation hard.
         p_phase = out / "phase_labels.csv"
         if p_phase.exists():
             try:
                 rows = list(_csv.DictReader(p_phase.open(encoding="utf-8")))
-                valid_phases = {"Intro", "Night", "Day", "Nomination", "Execution", "Unknown"}
-                bad = [r["phase"] for r in rows if r.get("phase") not in valid_phases]
+                valid_phases   = {"Intro", "Night", "Day", "Unknown"}
+                legacy_phases  = {"Nomination", "Execution"}
+                bad    = [r["phase"] for r in rows
+                          if r.get("phase") not in valid_phases | legacy_phases]
+                legacy = [r["phase"] for r in rows
+                          if r.get("phase") in legacy_phases]
+                has_round = rows and "round" in rows[0]
                 if bad:
                     issues.append(f"{vid}: phase_labels.csv has unrecognised phases: {bad[:3]}")
+                elif legacy:
+                    issues.append(
+                        f"{vid}: phase_labels.csv contains legacy phases "
+                        f"{set(legacy)} — re-run detect_phases.py to upgrade"
+                    )
+                elif not has_round:
+                    issues.append(f"{vid}: phase_labels.csv missing 'round' column — re-run phases step")
                 else:
                     n2_valid += 1
             except Exception as exc:
                 issues.append(f"{vid}: phase_labels.csv unreadable — {exc}")
 
-        # N3: claims.csv + claim_graph.json
-        p_claims = out / "claims.csv"
-        p_graph  = out / "claim_graph.json"
-        if p_claims.exists() and p_graph.exists():
+        # N2b: day_events.csv — presence check only (content not strictly required)
+        p_events = out / "day_events.csv"
+        if p_events.exists():
             try:
-                rows = list(_csv.DictReader(p_claims.open(encoding="utf-8")))
-                _ = json.loads(p_graph.read_text(encoding="utf-8"))
+                erows = list(_csv.DictReader(p_events.open(encoding="utf-8")))
+                valid_events = {
+                    "NominationStart", "VoteSequence", "ExecutionAnnouncement",
+                    "StorytellerInterruption", "DayEnd",
+                }
+                bad_ev = [r["event"] for r in erows if r.get("event") not in valid_events]
+                if bad_ev:
+                    issues.append(f"{vid}: day_events.csv has unrecognised event types: {bad_ev[:3]}")
+            except Exception as exc:
+                issues.append(f"{vid}: day_events.csv unreadable — {exc}")
+
+        # N3: claims.csv (claim_graph.json is optional / not required by build_db)
+        p_claims = out / "claims.csv"
+        if p_claims.exists():
+            try:
+                list(_csv.DictReader(p_claims.open(encoding="utf-8")))
                 n3_valid += 1
             except Exception as exc:
-                issues.append(f"{vid}: claims artifact unreadable — {exc}")
+                issues.append(f"{vid}: claims.csv unreadable — {exc}")
 
-    summary = (f"N1 consistency: {n1_present}/{n1_total}  "
-               f"N2 phases: {n2_valid}/{n1_total}  "
-               f"N3 claims: {n3_valid}/{n1_total}")
+        # N4: player_status.csv + death_events.csv
+        p_pstatus = out / "player_status.csv"
+        p_deathe  = out / "death_events.csv"
+        if p_pstatus.exists() and p_deathe.exists():
+            try:
+                list(_csv.DictReader(p_pstatus.open(encoding="utf-8")))
+                derows = list(_csv.DictReader(p_deathe.open(encoding="utf-8")))
+                valid_etypes = {"execution", "night_death", "uncertain_death"}
+                bad_et = [r["event_type"] for r in derows
+                          if r.get("event_type") not in valid_etypes]
+                if bad_et:
+                    issues.append(
+                        f"{vid}: death_events.csv has unrecognised event_type: {bad_et[:3]}"
+                    )
+                else:
+                    n4_valid += 1
+            except Exception as exc:
+                issues.append(f"{vid}: N4 CSV unreadable — {exc}")
+
+    summary = (f"N0 scan: {n0_present}/{n_total}  "
+               f"N1 consistency: {n1_present}/{n_total}  "
+               f"N2 phases: {n2_valid}/{n_total}  "
+               f"N3 claims: {n3_valid}/{n_total}  "
+               f"N4 status: {n4_valid}/{n_total}")
     rpt.add(INFO, "enrichment:artifacts", summary)
 
     for issue in issues:
