@@ -594,7 +594,7 @@ _HTML = """\
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
-<title>🏰 BotC · Yogscast Lie Tracker</title>
+<title>🏰 BotC · Yogscast Analytics</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <style>
 :root {{
@@ -1405,7 +1405,7 @@ body.mc #theme-toggle:active {{
 
 <header>
   <div class="hero-title">🏰 Blood on the Clocktower</div>
-  <div class="hero-sub">Yogscast &middot; Automated lie detection across every game</div>
+  <div class="hero-sub">Yogscast &middot; Behavioral analytics across every game</div>
   <button class="btn-info" onclick="document.getElementById('botc-info-overlay').style.display='flex'">❓ What is Blood on the Clocktower?</button>
 
   <div class="wins-board" id="wins-board"></div>
@@ -1418,6 +1418,32 @@ body.mc #theme-toggle:active {{
 </header>
 
 <main class="container">
+
+  <section>
+    <div class="section-title"><span>🔬</span> About this project</div>
+    <div class="table-card" style="padding:20px 24px;line-height:1.7;color:var(--text)">
+      <p style="margin-bottom:10px">
+        BotC_yog is a behavioral analytics project built on Yogscast Blood on the Clocktower games.
+        The pipeline automatically transcribes and diarizes each video, extracts game events, and
+        builds structured datasets covering nominations, executions, player claims, and outcomes.
+      </p>
+      <p style="margin-bottom:10px">
+        <strong>What it can do today:</strong>
+        detect game phases &amp; day structure &middot;
+        track player status and death events &middot;
+        extract nomination events &middot;
+        link nominations to execution episodes &middot;
+        attach claimed-role context to executions &middot;
+        flag lies (claimed role vs actual role card).
+      </p>
+      <p style="color:var(--muted);font-size:.9rem">
+        <strong>Current limits:</strong>
+        nomination coverage is partial (not every vote window has a recoverable transcript signal) &middot;
+        vote tallies not yet extracted &middot;
+        night intent and rumor propagation not yet modeled.
+      </p>
+    </div>
+  </section>
 
   <section>
     <div class="section-title"><span>🏆</span> Superlatives</div>
@@ -1535,8 +1561,8 @@ body.mc #theme-toggle:active {{
     <p><strong>Blood on the Clocktower</strong> is a social deduction game for 5–20 players, played in person. Think Mafia or Werewolf, but with a dedicated Storyteller, full information during setup, and the ability to win even from the grave.</p>
     <p>Players are split into two teams: <strong>Good</strong> (Townsfolk &amp; Outsiders) and <strong>Evil</strong> (Minions &amp; the Demon). Each player is dealt a secret role card with a unique ability. Good wins by executing the Demon; Evil wins if the Demon survives until only two players remain.</p>
     <p>Every night the Demon and Minions wake silently to scheme, while Townsfolk may receive clues from the Storyteller. Every <strong>day</strong>, players openly debate, accuse, and vote to execute one suspect — then night falls again.</p>
-    <p><strong>Role-claiming</strong> is central to strategy. Good players share information; Evil players lie about who they are. This tracker automatically flags whenever a player's stated role doesn't match their actual role card — that's a lie!</p>
-    <p>The Yogscast play on their charity streams, usually with 10–15 players. The games you see here have all been automatically transcribed and analysed.</p>
+    <p><strong>Role-claiming</strong> is central to strategy. Good players share information; Evil players lie about who they are. This project automatically transcribes every game and extracts behavioral data: who nominates whom, who gets executed, what roles players claim, and where those claims don't match their actual role card.</p>
+    <p>The Yogscast play on their charity streams, usually with 10–15 players. The games you see here have all been automatically transcribed and analysed for nominations, executions, claims, and social pressure.</p>
   </div>
 </div>
 
@@ -1591,8 +1617,8 @@ function toggleTheme() {{
   if (btn) btn.textContent = isMC ? '🌙 Classic' : '⛏ MC Mode';
   const sub = document.querySelector('.hero-sub');
   if (sub) sub.textContent = isMC
-    ? '⛏  Yogscast  ·  Auto-lie detection across every game  ⛏'
-    : 'Yogscast · Automated lie detection across every game';
+    ? '⛏  Yogscast  ·  Behavioral analytics across every game  ⛏'
+    : 'Yogscast · Behavioral analytics across every game';
   updateChartTheme();
 }}
 
@@ -2079,7 +2105,7 @@ function renderAll() {{
     const btn = document.getElementById('theme-toggle');
     if (btn) btn.textContent = '🌙 Classic';
     const sub = document.querySelector('.hero-sub');
-    if (sub) sub.textContent = '⛏  Yogscast  ·  Auto-lie detection across every game  ⛏';
+    if (sub) sub.textContent = '⛏  Yogscast  ·  Behavioral analytics across every game  ⛏';
     updateChartTheme();
   }}
 }})();
